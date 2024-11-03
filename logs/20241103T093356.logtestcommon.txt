@@ -1,0 +1,27 @@
+2024-11-01 20:52:22.466 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 38473...
+2024-11-01 20:52:22.468 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
+2024-11-01 20:52:22.474 - INFO    - MainThread - client.py:341 [_onSocketHasData] - Logged on to server version 178
+2024-11-01 20:52:22.489 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2110, reqId -1: Connectivity between Trader Workstation and server is broken. It will be restored automatically.
+2024-11-01 20:52:22.491 - ERROR   - MainThread - decoder.py:189 [handler] - Error for managedAccounts:
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 187, in handler
+    method(*args)
+    ~~~~~~^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 291, in managedAccounts
+    self.ib.managedAccounts(accountsList)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: IBStoreInsync.managedAccounts() takes 1 positional argument but 2 were given
+2024-11-01 20:52:22.497 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2024-11-01 20:52:22.497 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2024-11-01 20:52:22.498 - INFO    - MainThread - client.py:218 [connectAsync] - API connection ready
+2024-11-01 20:52:22.498 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2024-11-01 20:52:22.499 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2024-11-01 20:52:22.499 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:apachmds
+2024-11-01 20:52:22.500 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2024-11-01 20:52:22.500 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefhk
+2024-11-01 20:52:26.515 - ERROR   - MainThread - ibstore_insync.py:2797 [connectAsync] - positions request timed out
+2024-11-01 20:52:26.515 - ERROR   - MainThread - ibstore_insync.py:2797 [connectAsync] - open orders request timed out
+2024-11-01 20:52:26.515 - ERROR   - MainThread - ibstore_insync.py:2797 [connectAsync] - completed orders request timed out
+2024-11-01 20:52:30.525 - ERROR   - MainThread - ibstore_insync.py:2805 [connectAsync] - executions request timed out
+2024-11-01 20:52:30.525 - INFO    - MainThread - ibstore_insync.py:2815 [connectAsync] - Synchronization complete
+2024-11-01 20:52:30.532 - ERROR   - MainThread - wrapper.py:1205 [error] - Error 200, reqId 3: No security definition has been found for the request, contract: Contract(secType='STK', symbol='GOOG', exchange='SMART', currency='USD')

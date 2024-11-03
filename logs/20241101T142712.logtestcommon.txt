@@ -1,0 +1,75 @@
+2024-11-01 14:26:04.025 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 40135...
+2024-11-01 14:26:04.026 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
+2024-11-01 14:26:04.031 - INFO    - MainThread - client.py:341 [_onSocketHasData] - Logged on to server version 178
+2024-11-01 14:26:04.041 - ERROR   - MainThread - decoder.py:189 [handler] - Error for managedAccounts:
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 187, in handler
+    method(*args)
+    ~~~~~~^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 291, in managedAccounts
+    self.ib.managedAccounts(accountsList)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: IBStoreInsync.managedAccounts() takes 1 positional argument but 2 were given
+2024-11-01 14:26:04.047 - INFO    - MainThread - client.py:218 [connectAsync] - API connection ready
+2024-11-01 14:26:04.048 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2024-11-01 14:26:04.049 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2024-11-01 14:26:04.049 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2024-11-01 14:26:04.049 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2024-11-01 14:26:04.050 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:apachmds
+2024-11-01 14:26:04.050 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2024-11-01 14:26:04.050 - INFO    - MainThread - wrapper.py:1203 [error] - Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefhk
+2024-11-01 14:26:04.359 - INFO    - MainThread - ibstore_insync.py:2705 [connectAsync] - Synchronization complete
+2024-11-01 14:26:04.419 - ERROR   - MainThread - decoder.py:200 [interpret] - Error handling fields: ['10', '3', 'EUR', 'CASH', '', '0', '', 'IDEALPRO', 'USD', 'EUR.USD', 'EUR.USD', 'EUR.USD', '12087792', '0.00005', '', 'ACTIVETIM,AD,ADJUST,ALERT,ALGO,ALLOC,AVGCOST,BASKET,CASHQTY,COND,CONDORDER,DAY,DEACT,DEACTDIS,DEACTEOD,GAT,GTC,GTD,GTT,HID,IOC,LIT,LMT,MIT,MKT,NONALGO,OCA,REL,RELPCTOFS,SCALE,SCALERST,STP,STPLMT,TRAIL,TRAILLIT,TRAILLMT,TRAILMIT,WHATIF', 'IDEALPRO', '1', '0', 'European Monetary Union Euro', '', '', '', '', '', 'US/Eastern', '20241031:1715-20241101:1700;20241102:CLOSED;20241103:1715-20241104:1700;20241104:1715-20241105:1700;20241105:1715-20241106:1700;20241106:1715-20241107:1700', '20241031:1715-20241101:1700;20241102:CLOSED;20241103:1715-20241104:1700;20241104:1715-20241105:1700;20241105:1715-20241106:1700;20241106:1715-20241107:1700', '', '', '0', '4', '', '', '3188', '', '', '0.01', '0.01', '0.01']
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 198, in interpret
+    handler(fields)
+    ~~~~~~~^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 338, in contractDetails
+    self.wrapper.contractDetails(int(reqId), cd)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 588, in contractDetails
+    self.ib.contractDetails(reqId, contractDetails)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstore_insync.py", line 486, in contractDetails
+    self.qs[reqId].put(contractDetails)
+    ~~~~~~~^^^^^^^
+KeyError: 3
+2024-11-01 14:26:04.422 - ERROR   - MainThread - decoder.py:189 [handler] - Error for contractDetailsEnd:
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 187, in handler
+    method(*args)
+    ~~~~~~^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 594, in contractDetailsEnd
+    self.ib.contractDetailsEnd(reqId)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstore_insync.py", line 481, in contractDetailsEnd
+    self.cancelQueue(self.qs[reqId], True)
+                     ~~~~~~~^^^^^^^
+KeyError: 3
+2024-11-01 14:26:04.482 - ERROR   - MainThread - decoder.py:200 [interpret] - Error handling fields: ['10', '4', 'EUR', 'CASH', '', '0', '', 'IDEALPRO', 'USD', 'EUR.USD', 'EUR.USD', 'EUR.USD', '12087792', '0.00005', '', 'ACTIVETIM,AD,ADJUST,ALERT,ALGO,ALLOC,AVGCOST,BASKET,CASHQTY,COND,CONDORDER,DAY,DEACT,DEACTDIS,DEACTEOD,GAT,GTC,GTD,GTT,HID,IOC,LIT,LMT,MIT,MKT,NONALGO,OCA,REL,RELPCTOFS,SCALE,SCALERST,STP,STPLMT,TRAIL,TRAILLIT,TRAILLMT,TRAILMIT,WHATIF', 'IDEALPRO', '1', '0', 'European Monetary Union Euro', '', '', '', '', '', 'US/Eastern', '20241031:1715-20241101:1700;20241102:CLOSED;20241103:1715-20241104:1700;20241104:1715-20241105:1700;20241105:1715-20241106:1700;20241106:1715-20241107:1700', '20241031:1715-20241101:1700;20241102:CLOSED;20241103:1715-20241104:1700;20241104:1715-20241105:1700;20241105:1715-20241106:1700;20241106:1715-20241107:1700', '', '', '0', '4', '', '', '3188', '', '', '0.01', '0.01', '0.01']
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 198, in interpret
+    handler(fields)
+    ~~~~~~~^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 338, in contractDetails
+    self.wrapper.contractDetails(int(reqId), cd)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 588, in contractDetails
+    self.ib.contractDetails(reqId, contractDetails)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstore_insync.py", line 486, in contractDetails
+    self.qs[reqId].put(contractDetails)
+    ~~~~~~~^^^^^^^
+KeyError: 4
+2024-11-01 14:26:04.483 - ERROR   - MainThread - decoder.py:189 [handler] - Error for contractDetailsEnd:
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 187, in handler
+    method(*args)
+    ~~~~~~^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 594, in contractDetailsEnd
+    self.ib.contractDetailsEnd(reqId)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstore_insync.py", line 481, in contractDetailsEnd
+    self.cancelQueue(self.qs[reqId], True)
+                     ~~~~~~~^^^^^^^
+KeyError: 4

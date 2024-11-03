@@ -1,0 +1,16 @@
+2024-10-29 18:36:07.544 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 54883...
+2024-10-29 18:36:07.546 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
+2024-10-29 18:36:07.551 - INFO    - MainThread - client.py:341 [_onSocketHasData] - Logged on to server version 176
+2024-10-29 18:36:07.552 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2024-10-29 18:36:07.553 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2024-10-29 18:36:07.553 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfuture
+2024-10-29 18:36:07.557 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2024-10-29 18:36:07.557 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2024-10-29 18:36:07.557 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:apachmds
+2024-10-29 18:36:07.557 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:cashhmds
+2024-10-29 18:36:07.557 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2024-10-29 18:36:07.557 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefhk
+2024-10-29 18:36:07.557 - INFO    - MainThread - client.py:218 [connectAsync] - API connection ready
+2024-10-29 18:36:07.962 - INFO    - MainThread - ib.py:1789 [connectAsync] - Synchronization complete
+2024-10-29 18:41:02.648 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfuture.il
+2024-10-29 18:41:02.649 - ERROR   - MainThread - wrapper.py:1113 [error] - Error 321, reqId 3: Error validating request.-'bI' : cause - Please enter a valid security type, contract: Contract(symbol='EUR.USD-CASH-IDEALPRO', exchange='SMART')

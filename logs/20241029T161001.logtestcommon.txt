@@ -1,0 +1,15 @@
+2024-10-29 16:09:41.806 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 62585...
+2024-10-29 16:09:41.809 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
+2024-10-29 16:09:41.814 - INFO    - MainThread - client.py:341 [_onSocketHasData] - Logged on to server version 176
+2024-10-29 16:09:41.816 - INFO    - MainThread - client.py:218 [connectAsync] - API connection ready
+2024-10-29 16:09:41.816 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2024-10-29 16:09:41.817 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2024-10-29 16:09:41.818 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfuture
+2024-10-29 16:09:41.818 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2024-10-29 16:09:41.818 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2024-10-29 16:09:41.818 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:apachmds
+2024-10-29 16:09:41.818 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:cashhmds
+2024-10-29 16:09:41.818 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2024-10-29 16:09:41.818 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefhk
+2024-10-29 16:09:42.028 - INFO    - MainThread - ib.py:1789 [connectAsync] - Synchronization complete
+2024-10-29 16:09:43.545 - ERROR   - MainThread - wrapper.py:1113 [error] - Error 200, reqId 3: The destination or exchange selected is Invalid. Please review your order's "Destination" field. If using a <br>Directed order, review the exchange selected when creating the order ticket or order row. This may occur when <br>creating stock orders for the overnight session or when creating option orders for the overnight session., contract: Contract(secType='CFD', symbol='IBUS30', exchange='USD', currency='SMART')

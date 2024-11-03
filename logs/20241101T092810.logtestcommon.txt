@@ -1,0 +1,23 @@
+2024-11-01 09:22:47.549 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 40562...
+2024-11-01 09:22:47.551 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
+2024-11-01 09:22:47.555 - INFO    - MainThread - client.py:341 [_onSocketHasData] - Logged on to server version 178
+2024-11-01 09:22:47.562 - ERROR   - MainThread - decoder.py:189 [handler] - Error for managedAccounts:
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 187, in handler
+    method(*args)
+    ~~~~~~^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 291, in managedAccounts
+    self.ib.managedAccounts(accountsList)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+TypeError: IBStoreInsync.managedAccounts() takes 1 positional argument but 2 were given
+2024-11-01 09:22:47.566 - INFO    - MainThread - client.py:218 [connectAsync] - API connection ready
+2024-11-01 09:22:47.567 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2024-11-01 09:22:47.568 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2024-11-01 09:22:47.568 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2024-11-01 09:22:47.568 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2024-11-01 09:22:47.569 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:euhmds
+2024-11-01 09:22:47.569 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:apachmds
+2024-11-01 09:22:47.570 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:fundfarm
+2024-11-01 09:22:47.570 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2024-11-01 09:22:47.570 - INFO    - MainThread - wrapper.py:1204 [error] - Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefhk
+2024-11-01 09:22:47.777 - INFO    - MainThread - ibstore_insync.py:2722 [connectAsync] - Synchronization complete
