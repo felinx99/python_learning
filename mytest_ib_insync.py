@@ -44,14 +44,15 @@ print(contract)
 cds = ib.reqContractDetails(contract)
 assert len(cds)==1
 
-endDateTime = datetime.datetime.now().astimezone(datetime.timezone.utc)
+endDateTime = datetime.datetime(2014, 12, 31)
+#endDateTime = datetime.datetime.now().astimezone(datetime.timezone.utc)
 
 data0 = ib.reqHistoricalData(
         contract=contract,
-        endDateTime='',
+        endDateTime=endDateTime,
         durationStr='1 D',
         barSizeSetting='30 mins',
-        whatToShow='Bid_Ask',
+        whatToShow='Bid',
         useRTH=0, #0 = Includes data outside of RTH | 1 = RTH data only 
         formatDate = 1, 
         keepUpToDate = False, #0 = False | 1 = True

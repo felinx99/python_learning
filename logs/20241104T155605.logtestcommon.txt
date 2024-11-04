@@ -1,0 +1,38 @@
+2024-11-04 15:52:20.107 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 20832...
+2024-11-04 15:52:20.109 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
+2024-11-04 15:52:20.112 - INFO    - MainThread - client.py:341 [_onSocketHasData] - Logged on to server version 178
+2024-11-04 15:52:20.131 - INFO    - MainThread - client.py:218 [connectAsync] - API connection ready
+2024-11-04 15:52:20.132 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2024-11-04 15:52:20.133 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2024-11-04 15:52:20.136 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2024-11-04 15:52:20.136 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2024-11-04 15:52:20.137 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:euhmds
+2024-11-04 15:52:20.137 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:apachmds
+2024-11-04 15:52:20.138 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:fundfarm
+2024-11-04 15:52:20.138 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2024-11-04 15:52:20.138 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefhk
+2024-11-04 15:52:20.585 - INFO    - MainThread - ibstore_insync.py:2754 [connectAsync] - Synchronization complete
+2024-11-04 15:52:26.391 - ERROR   - MainThread - decoder.py:200 [interpret] - Error handling fields: ['17', '7', '20151013 12:00:00 US/Eastern', '20151014 12:00:00 US/Eastern', '16', '20151014 04:00:00 US/Eastern', '32.19', '32.52', '32.19', '32.33', '-1', '-1', '-1', '20151014 04:30:00 US/Eastern', '32.33', '32.33', '32.32', '32.32', '-1', '-1', '-1', '20151014 05:00:00 US/Eastern', '32.32', '32.34', '32.32', '32.34', '-1', '-1', '-1', '20151014 05:30:00 US/Eastern', '32.34', '32.36', '32.32', '32.34', '-1', '-1', '-1', '20151014 06:00:00 US/Eastern', '32.34', '32.38', '32.33', '32.38', '-1', '-1', '-1', '20151014 06:30:00 US/Eastern', '32.38', '32.38', '32.35', '32.35', '-1', '-1', '-1', '20151014 07:00:00 US/Eastern', '32.35', '32.37', '32.35', '32.36', '-1', '-1', '-1', '20151014 07:30:00 US/Eastern', '32.36', '32.45', '32.36', '32.45', '-1', '-1', '-1', '20151014 08:00:00 US/Eastern', '32.45', '32.56', '32.45', '32.56', '-1', '-1', '-1', '20151014 08:30:00 US/Eastern', '32.56', '32.60', '32.51', '32.51', '-1', '-1', '-1', '20151014 09:00:00 US/Eastern', '32.51', '32.65', '32.51', '32.60', '-1', '-1', '-1', '20151014 09:30:00 US/Eastern', '32.60', '32.95', '32.56', '32.87', '-1', '-1', '-1', '20151014 10:00:00 US/Eastern', '32.87', '32.88', '32.53', '32.58', '-1', '-1', '-1', '20151014 10:30:00 US/Eastern', '32.58', '32.64', '32.46', '32.55', '-1', '-1', '-1', '20151014 11:00:00 US/Eastern', '32.55', '32.60', '32.48', '32.51', '-1', '-1', '-1', '20151014 11:30:00 US/Eastern', '32.51', '32.61', '32.49', '32.60', '-1', '-1', '-1']
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 198, in interpret
+    handler(fields)
+    ~~~~~~~^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 476, in historicalData
+    self.wrapper.historicalDataEnd(int(reqId), startDateStr, endDateStr)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 646, in historicalDataEnd
+    fromDate = bars[0].date
+               ~~~~^^^
+TypeError: 'NoneType' object is not subscriptable
+2024-11-04 15:52:27.297 - ERROR   - MainThread - decoder.py:200 [interpret] - Error handling fields: ['17', '10', '20151013 12:00:00 US/Eastern', '20151014 12:00:00 US/Eastern', '16', '20151014 04:00:00 US/Eastern', '32.91', '32.93', '32.52', '32.93', '-1', '-1', '-1', '20151014 04:30:00 US/Eastern', '32.93', '32.93', '32.89', '32.89', '-1', '-1', '-1', '20151014 05:00:00 US/Eastern', '32.89', '32.91', '32.87', '32.87', '-1', '-1', '-1', '20151014 05:30:00 US/Eastern', '32.87', '32.90', '32.86', '32.86', '-1', '-1', '-1', '20151014 06:00:00 US/Eastern', '32.86', '32.86', '32.86', '32.86', '-1', '-1', '-1', '20151014 06:30:00 US/Eastern', '32.86', '32.90', '32.86', '32.90', '-1', '-1', '-1', '20151014 07:00:00 US/Eastern', '32.90', '32.90', '32.90', '32.90', '-1', '-1', '-1', '20151014 07:30:00 US/Eastern', '32.90', '32.90', '32.90', '32.90', '-1', '-1', '-1', '20151014 08:00:00 US/Eastern', '32.90', '32.90', '32.57', '32.69', '-1', '-1', '-1', '20151014 08:30:00 US/Eastern', '32.69', '32.90', '32.60', '32.77', '-1', '-1', '-1', '20151014 09:00:00 US/Eastern', '32.77', '32.77', '32.67', '32.70', '-1', '-1', '-1', '20151014 09:30:00 US/Eastern', '32.70', '32.98', '32.59', '32.90', '-1', '-1', '-1', '20151014 10:00:00 US/Eastern', '32.90', '32.90', '32.55', '32.61', '-1', '-1', '-1', '20151014 10:30:00 US/Eastern', '32.61', '32.67', '32.50', '32.58', '-1', '-1', '-1', '20151014 11:00:00 US/Eastern', '32.58', '32.63', '32.48', '32.54', '-1', '-1', '-1', '20151014 11:30:00 US/Eastern', '32.54', '32.62', '32.51', '32.62', '-1', '-1', '-1']
+Traceback (most recent call last):
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 198, in interpret
+    handler(fields)
+    ~~~~~~~^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\decoder.py", line 476, in historicalData
+    self.wrapper.historicalDataEnd(int(reqId), startDateStr, endDateStr)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\gitcode\backtrader\backtrader\stores\ibstores\wrapper.py", line 646, in historicalDataEnd
+    fromDate = bars[0].date
+               ~~~~^^^
+TypeError: 'NoneType' object is not subscriptable

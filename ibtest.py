@@ -5,6 +5,8 @@ from ibapi.contract import Contract
 import threading
 import time
 from datetime import datetime, timezone, timedelta
+import zoneinfo
+import matplotlib.dates as mdates
 
 class TradeApp(EWrapper, EClient):
     def __init__(self): 
@@ -60,6 +62,17 @@ class TradeApp(EWrapper, EClient):
     def historicalDataEnd(self, reqId: int, start: str, end: str):
         print("HistoricalDataEnd. ReqId:", reqId, "from", start, "to", end)
 
+    def headTimestamp(self, reqId, headTimestamp):
+        print(f"headTimestamp ReqId:", reqId,"headTimestamp:", headTimestamp)
+
+    def contractDetails(self, reqId: int, contractDetails: ContractDetails):
+        print(reqId, contractDetails)
+
+    def contractDetailsEnd(self, reqId: int):
+        print("ContractDetailsEnd. ReqId:", reqId)
+
+    def bondContractDetails(self, reqId: int, contractDetails: ContractDetails):
+        print(reqId, contractDetails)
 
 def websocket_con():
     app.run()
@@ -83,6 +96,21 @@ fromdate = todate - relativedelta(**kwargs)
 print(f"fromdate: {fromdate}")
 print(f"todate: {todate}")
 
+
+date= datetime(2024, 11, 1, 4, 0, tzinfo=zoneinfo.ZoneInfo(key='US/Eastern'))
+dt = mdates.date2num(date)
+cover_date = mdates.num2date(dt)
+print(f'date: {date}')
+print(f"convert date: {cover_date}")
+
+headTimestamp = '20140113-14:30:00'
+# 指定日期时间格式
+format_str = '%Y%m%d-%H:%M:%S'
+
+# 将字符串转换为 datetime 对象
+dt = datetime.strptime(headTimestamp, format_str)
+
+
 app = TradeApp()      
 app.connect("127.0.0.1", 7497, clientId=15)
 
@@ -101,16 +129,27 @@ contract.secType = "STK"
 contract.exchange = "SMART"
 contract.currency = "USD"
 
+reqId = 102
+app.reqContractDetails(reqId=reqId, contract=contract)
+
+
+
+reqId = 103
+timestamp = app.reqHeadTimeStamp(reqId, contract, "TRADES", 1, 1)
+app.cancelHeadTimeStamp(reqId)
+
+endDateTime = '20151015 16:00:00 US/Eastern'
+
 data0 = app.reqHistoricalData(
         reqId=101,
         contract=contract,
-        endDateTime='',
+        endDateTime=endDateTime,
         durationStr='1 D',
-        barSizeSetting='1 min',
+        barSizeSetting='30 mins',
         whatToShow='Trades',
         useRTH=0, #0 = Includes data outside of RTH | 1 = RTH data only 
         formatDate = 1, 
-        keepUpToDate = True, #0 = False | 1 = True
+        keepUpToDate = False, #0 = False | 1 = True
         chartOptions=[])
 
 

@@ -1,0 +1,14 @@
+2024-11-04 15:29:59.071 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 43970...
+2024-11-04 15:29:59.073 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
+2024-11-04 15:29:59.079 - INFO    - MainThread - client.py:341 [_onSocketHasData] - Logged on to server version 178
+2024-11-04 15:29:59.098 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2104, reqId -1: Market data farm connection is OK:hfarm
+2024-11-04 15:29:59.099 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2104, reqId -1: Market data farm connection is OK:cashfarm
+2024-11-04 15:29:59.100 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm.nj
+2024-11-04 15:29:59.102 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm
+2024-11-04 15:29:59.103 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:euhmds
+2024-11-04 15:29:59.103 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:apachmds
+2024-11-04 15:29:59.103 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:fundfarm
+2024-11-04 15:29:59.104 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
+2024-11-04 15:29:59.104 - INFO    - MainThread - wrapper.py:1217 [error] - Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefhk
+2024-11-04 15:29:59.105 - INFO    - MainThread - client.py:218 [connectAsync] - API connection ready
+2024-11-04 15:29:59.461 - INFO    - MainThread - ibstore_insync.py:2754 [connectAsync] - Synchronization complete

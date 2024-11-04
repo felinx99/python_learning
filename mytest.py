@@ -27,8 +27,8 @@ import backtrader as bt
 import teststrategy
 import datetime as dt
 
-FROMDATE = dt.datetime(2006, 1, 1)
-TODATE = dt.datetime(2006, 12, 31)
+FROMDATE = dt.datetime(2014, 12, 1)
+TODATE = dt.datetime(2015, 10, 15)
 
 def test_run(args=None):
     cerebro = bt.Cerebro(stdstats=False)
@@ -41,16 +41,33 @@ def test_run(args=None):
         secType='STK',   # SecurityType is STOCK
         exchange='SMART',# Trading exchange IB's SMART exchange
         currency='USD',  # Currency of SecurityType
-        todate = '',
+        todate = TODATE,
         durationStr='1 D',
         barSizeSetting='30 mins',
         historical=True,
-        what='Trades',
+        what='Bid',
         formatDate = 1, 
-        keepUpToDate = True,
+        keepUpToDate = False,
         )
     
     cerebro.adddata(data0)
+
+    data1 = bt.feeds.IBData(
+        name="GOOG",     # Data name
+        dataname='GOOG', # Symbol name
+        secType='STK',   # SecurityType is STOCK
+        exchange='SMART',# Trading exchange IB's SMART exchange
+        currency='USD',  # Currency of SecurityType
+        todate = TODATE,
+        durationStr='1 D',
+        barSizeSetting='30 mins',
+        historical=True,
+        what='Ask',
+        formatDate = 1, 
+        keepUpToDate = False,
+        )
+    
+    cerebro.adddata(data1)
 
     cerebro.broker = store.getbroker()
     cerebro.addstrategy(teststrategy.St)
