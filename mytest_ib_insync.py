@@ -36,22 +36,29 @@ ib = IB.IBStoreInsync(port=7497, _debug=True)
 
 contract = IB.Contract()
 contract.symbol = "GOOG"
-contract.secType = "STK"
+contract.secType = "OPT"
 contract.exchange = "SMART"
 contract.currency = "USD"
+contract.lastTradeDateOrContractMonth ='20241220'
+contract.strike = 180
+contract.right = "C"
+contract.multiplier = "100"
 
 print(contract)
 cds = ib.reqContractDetails(contract)
+print(cds)
 assert len(cds)==1
 
-endDateTime = datetime.datetime(2014, 12, 31)
+starttime = ib.reqHeadTimeStamp(contract, 'Trades', 1, 1)
+print(starttime)
+endDateTime = datetime.datetime(2024, 11, 16)
 #endDateTime = datetime.datetime.now().astimezone(datetime.timezone.utc)
 
 data0 = ib.reqHistoricalData(
         contract=contract,
-        endDateTime=endDateTime,
-        durationStr='1 D',
-        barSizeSetting='30 mins',
+        endDateTime='',
+        durationStr='1 M',
+        barSizeSetting='1 hour',
         whatToShow='Bid',
         useRTH=0, #0 = Includes data outside of RTH | 1 = RTH data only 
         formatDate = 1, 

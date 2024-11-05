@@ -59,7 +59,7 @@ import logging
 # 使用 os.path.splitext() 分割文件名
 filename_without_extension, extension = os.path.splitext(__file__)
 logfile = 'log' + os.path.basename(filename_without_extension) + '.txt'
-mylogger = custom_logger.setup_custom_logger(global_name='mylog', filename=logfile, console=True, debug_level=logging.INFO)
+#mylogger = custom_logger.setup_custom_logger(global_name='mylog', filename=logfile, console=True, debug_level=logging.INFO)
 
 def getdata(index, fromdate=FROMDATE, todate=TODATE):
 

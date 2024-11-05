@@ -121,13 +121,15 @@ time.sleep(1)
 
 summary = app.reqAccountSummary(reqId=1, groupName='All', tags='NetLiquidation')
 
-account = app.reqAccountUpdates(subscribe=True, acctCode='DU9965348')
+#account = app.reqAccountUpdates(subscribe=True, acctCode='DU9965348')
 
 contract = Contract()
-contract.symbol = "GOOG"
-contract.secType = "STK"
-contract.exchange = "SMART"
+contract.symbol = "ESZ3"
+contract.secType = "FUT"
+contract.exchange = "CME"
 contract.currency = "USD"
+contract.lastTradeDateOrContractMonth='202312'
+contract.IncludeExpired=True
 
 reqId = 102
 app.reqContractDetails(reqId=reqId, contract=contract)
@@ -138,20 +140,19 @@ reqId = 103
 timestamp = app.reqHeadTimeStamp(reqId, contract, "TRADES", 1, 1)
 app.cancelHeadTimeStamp(reqId)
 
-endDateTime = '20151015 16:00:00 US/Eastern'
+endDateTime = '20230615 16:00:00 US/Eastern'
 
 data0 = app.reqHistoricalData(
         reqId=101,
         contract=contract,
         endDateTime=endDateTime,
-        durationStr='1 D',
-        barSizeSetting='30 mins',
+        durationStr='1 M',
+        barSizeSetting='1 day',
         whatToShow='Trades',
         useRTH=0, #0 = Includes data outside of RTH | 1 = RTH data only 
         formatDate = 1, 
         keepUpToDate = False, #0 = False | 1 = True
         chartOptions=[])
-
 
 app.reqCurrentTime()
 
