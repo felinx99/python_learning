@@ -31,7 +31,25 @@ FROMDATE = dt.datetime(2014, 12, 1)
 TODATE = dt.datetime(2024, 10, 16)
 ENDDATE = ''
 
-ib_symbol = "WAR-GOOG-EUR-FWB-20201117-001-15000-C"
+mircofut_symbols = [
+    {'name':'GPBUSD', 'symbol':"FUT-M6B-USD-CME-20241216-6250-False"},
+    {'name':'AUDUSD', 'symbol':"FUT-M6A-USD-CME-20241216-10000-False"},
+    {'name':'EURUSD', 'symbol':"FUT-M6E-USD-CME-20241216-12500-False"},
+    {'name':'JPYUSD', 'symbol':"FUT-MJY-USD-CME-20241216-1250000-False"},
+    {'name':'CADUSD', 'symbol':"FUT-MCD-USD-CME-20241217-10000-False"},
+    {'name':'CHFUSD', 'symbol':"FUT-MSF-USD-CME-20241216-12500-False"},
+]
+             
+#   FUT-M6B-USD-CME-20241216-6250-False
+#   FUT-M6A-USD-CME-20241216-10000-False
+#   FUT-M6E-USD-CME-20241216-12500-False
+#   FUT-MJY-USD-CME-20241216-1250000-False
+#   FUT-MCD-USD-CME-20241217-10000-False
+#   FUT-MSF-USD-CME-20241216-12500-False
+
+
+""
+
 '''
 other contract params: '1 D', '30 mins', 'Bid', formatDate=1, keepUpToDate=False
 
@@ -61,38 +79,35 @@ WAR-GOOG-EUR-FWB-20201117-001-15000-C
 
 def test_run(args=None):
     cerebro = bt.Cerebro(stdstats=False)
-    store = bt.stores.IBStoreInsync(port=7497,
-                              _debug=True
-                              )
-    data0 = bt.feeds.IBData(
-        name="data0",     # Data name
-        dataname=ib_symbol, # Symbol name
-        todate = TODATE,
-        durationStr='1 M',
-        barSizeSetting='1 hour',
-        historical=True,
-        what='Trades',
-        useRTH=0,
-        formatDate = 1, 
-        keepUpToDate = False,
-        )
+    store = bt.stores.IBStoreInsync(clientId=214, port=4002, _debug=True)
     
-    cerebro.adddata(data0)
+    for fut_symbol in mircofut_symbols:
+        '''
+        data = bt.feeds.IBData(
+            name=fut_symbol['name'],     # Data name
+            dataname=fut_symbol['symbol'], # Symbol name
+            todate = '',
+            durationStr='3 M',
+            barSizeSetting='4 hours',
+            historical=True,
+            what='Trades',
+            useRTH=0,
+            formatDate = 1,
+            keepUpToDate = False,
+        )
+        '''
 
-    data1 = bt.feeds.IBData(
-        name="data1",     # Data name
-        dataname=ib_symbol, # Symbol name
-        todate = TODATE,
-        durationStr='1 M',
-        barSizeSetting='1 hour',
-        historical=True,
-        what='Trades',
-        useRTH=0,
-        formatDate = 1, 
-        keepUpToDate = False,
-        )
-    
-    cerebro.adddata(data1)
+        data = bt.feeds.IBData(
+               name=fut_symbol['name'], # Data name
+               dataname=fut_symbol['symbol'], # Symbol name
+               backfill_start=False,
+               backfill=False,
+               what='TRADES', # TRADES or MIDPOINT
+               useRTH=False,
+               rtbar=True
+              )
+        
+        cerebro.adddata(data)
 
     cerebro.broker = store.getbroker()
     cerebro.addstrategy(teststrategy.St)

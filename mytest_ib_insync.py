@@ -6,6 +6,9 @@ import logging
 import time
 import threading
 
+from IPython.display import display, clear_output
+import matplotlib.pyplot as plt
+
 # append module root directory to sys.path
 #lpath = sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 添加模块所在目录的绝对路径,然后导入模块正常了。否则报错(未安装backtrader) 
@@ -15,56 +18,87 @@ sys.path.append(r'E:\gitcode\backtrader')
 import backtrader as bt
 import backtrader.stores.ibstore_insync as IB
 
-def websocket_con():
-    IB.util.startLoop()
 
+def funCount(func):
+    def wrapper(*args, **kwargs):
+        wrapper.count += 1
+        current_time = time.time()
+        if wrapper.count > 1:
+            time_diff = current_time - wrapper.last_time
+            print(f"函数 {func.__name__} 第 {wrapper.count} 次调用，与上次调用相差 {time_diff:.3f} 秒")
+        elif wrapper.count == 1:
+            print(f"函数 {func.__name__} 第 {wrapper.count} 次调用")
+        wrapper.last_time = current_time
+        return func(*args, **kwargs)
+    wrapper.count = 0
+    wrapper.last_time = 0
+    return wrapper
+
+@funCount
+def onBarUpdate(bars, hasNewBar):
+    #plt.close('all')
+    curtime = bars[0].time
+    print(f"plot size:{len(bars)}, new data {curtime}")
+    #print(f"plot size:{len(bars)}")
+    plot = IB.util.barplot(bars=bars[-10:], title=str(curtime))
+    clear_output(wait=True)
+    display(plot)
+    plt.show()
+
+end_event = threading.Event()
+def websocket_con():
+    print("websocket_con is running...")
+        
 
 IB.util.logToConsole(logging.INFO)
 
-ib = IB.IBStoreInsync(port=7497, _debug=True)
-
-#myacc = ib.accountValues()
-#account = ib.reqAccountUpdates(account='DU9965348')
-
-#contract = ib_insync.Contract(symbol='DAX',lastTradeDateOrContractMonth = "202412", secType='FUT', exchange='EUREX')
-
-#contract = IB.Contract()
-#contract.symbol = "EUR"
-#contract.secType = "CASH"
-#contract.exchange = "IDEALPRO"
-#contract.currency = "USD"
+ib = IB.IBStoreInsync(clientId=214, port=4002, _debug=True)
+#con_thread = threading.Thread(name='ibtest', target=websocket_con, daemon=True)
+#con_thread.start()
 
 contract = IB.Contract()
-contract.symbol = "GOOG"
-contract.secType = "OPT"
-contract.exchange = "SMART"
+contract.symbol = "M6B"
+contract.secType = "FUT"
+contract.exchange = "CME"
 contract.currency = "USD"
-contract.lastTradeDateOrContractMonth ='20241220'
-contract.strike = 180
-contract.right = "C"
-contract.multiplier = "100"
+contract.lastTradeDateOrContractMonth ='20241216'
+contract.multiplier = "6250"
+
 
 print(contract)
 cds = ib.reqContractDetails(contract)
 print(cds)
 assert len(cds)==1
 
-starttime = ib.reqHeadTimeStamp(contract, 'Trades', 1, 1)
-print(starttime)
+#starttime = ib.reqHeadTimeStamp(contract, 'Trades', 1, 1)
 endDateTime = datetime.datetime(2024, 11, 16)
 #endDateTime = datetime.datetime.now().astimezone(datetime.timezone.utc)
 
+'''
 data0 = ib.reqHistoricalData(
         contract=contract,
         endDateTime='',
         durationStr='1 M',
-        barSizeSetting='1 hour',
-        whatToShow='Bid',
-        useRTH=0, #0 = Includes data outside of RTH | 1 = RTH data only 
+        barSizeSetting='1 min',
+        whatToShow='TRADES',
+        useRTH=1, #0 = Includes data outside of RTH | 1 = RTH data only 
         formatDate = 1, 
         keepUpToDate = False, #0 = False | 1 = True
         chartOptions=[])
 
-print(data0)
-    
+'''
+data0 = ib.reqRealTimeBars(contract, 5, 'TRADES', False)
 
+print(f"totel data 2:{len(data0)}")
+#ib.barUpdateEvent += onBarUpdate
+
+#ib.sleep(300)
+#ib.cancelRealTimeBars(data0)
+#ib.disconnect()
+
+while True:
+    # 检查信号量是否被设置
+    if end_event.is_set():
+        break
+    print(f"Loop is running...{len(data0)}")
+    ib.sleep(1)

@@ -1,26 +1,16 @@
-def consumer():
-    print('consumer start')
-    r = ''
-    while True:
-        print('wait before')
-        n = yield r
-        print(f'wait after {n}')
-        if not n:
-            print('consumer exit')
-            return
-        print('[CONSUMER] Consuming %s...' % n)
-        r = '200 OK'
+def onBarUpdate(bars):
+    print(f"plot size:{len(bars)}")
 
-def produce(c):
-    print('produce start')
-    c.send(None)
-    n = 0
-    while n < 5:
-        n = n + 1
-        print('[PRODUCER] Producing %s...' % n)
-        r = c.send(n)
-        print('[PRODUCER] Consumer return: %s' % r)
-    c.close()
 
-c = consumer()
-produce(c)
+list1 = [1, 2, 3]
+list2 = [4, 5, 6]
+
+# 直接赋值
+list1[len(list1):] = list2
+print(list1)  # 输出：[1, 2, 3, 4, 5, 6]
+
+list2.append(7)
+print(list2)
+print(list1)
+
+print('hello world')

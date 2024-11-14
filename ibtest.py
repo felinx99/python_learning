@@ -1,6 +1,7 @@
 from ibapi.client import *
 from ibapi.wrapper import *
 from ibapi.contract import Contract
+from ibapi.utils import floatMaxString, intMaxString, decimalMaxString, longMaxString
 
 import threading
 import time
@@ -74,6 +75,19 @@ class TradeApp(EWrapper, EClient):
     def bondContractDetails(self, reqId: int, contractDetails: ContractDetails):
         print(reqId, contractDetails)
 
+    def realtimeBar(self, reqId: TickerId, time:int, open_: float, high: float, low: float, close: float, volume: Decimal, wap: Decimal, count: int):
+        print(
+            "RealTimeBar. TickerId:", reqId,
+            " - Time: ", longMaxString(time) ,
+            ", Open: " , floatMaxString(open_) ,
+            ", High: " , floatMaxString(high) ,
+            ", Low: " , floatMaxString(low) ,
+            ", Close: " , floatMaxString(close) ,
+            ", Volume: " , decimalMaxString(volume) ,
+            ", Count: " , intMaxString(count) ,
+            ", WAP: " , decimalMaxString(wap)
+            )
+
 def websocket_con():
     app.run()
 
@@ -112,11 +126,12 @@ dt = datetime.strptime(headTimestamp, format_str)
 
 
 app = TradeApp()      
-app.connect("127.0.0.1", 7497, clientId=15)
+app.connect("127.0.0.1", 4002, clientId=15)
 
 con_thread = threading.Thread(name='ibtest', target=websocket_con, daemon=True)
 con_thread.start()
 
+'''
 time.sleep(1)
 
 summary = app.reqAccountSummary(reqId=1, groupName='All', tags='NetLiquidation')
@@ -124,12 +139,12 @@ summary = app.reqAccountSummary(reqId=1, groupName='All', tags='NetLiquidation')
 #account = app.reqAccountUpdates(subscribe=True, acctCode='DU9965348')
 
 contract = Contract()
-contract.symbol = "ESZ3"
+contract.symbol = "M6B"
 contract.secType = "FUT"
 contract.exchange = "CME"
 contract.currency = "USD"
-contract.lastTradeDateOrContractMonth='202312'
-contract.IncludeExpired=True
+contract.lastTradeDateOrContractMonth ='20241216'
+contract.multiplier = "6250"
 
 reqId = 102
 app.reqContractDetails(reqId=reqId, contract=contract)
@@ -141,7 +156,8 @@ timestamp = app.reqHeadTimeStamp(reqId, contract, "TRADES", 1, 1)
 app.cancelHeadTimeStamp(reqId)
 
 endDateTime = '20230615 16:00:00 US/Eastern'
-
+'''
+'''
 data0 = app.reqHistoricalData(
         reqId=101,
         contract=contract,
@@ -153,7 +169,17 @@ data0 = app.reqHistoricalData(
         formatDate = 1, 
         keepUpToDate = False, #0 = False | 1 = True
         chartOptions=[])
-
+'''
+'''
+data1 = app.reqRealTimeBars(
+    reqId=106,
+    contract=contract,
+    barSize=5,
+    whatToShow='TRADES',
+    useRTH=0,
+    realTimeBarsOptions=[],
+)
+'''
 app.reqCurrentTime()
 
 print('hello world')
