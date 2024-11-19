@@ -57,12 +57,10 @@ ib = IB.IBStoreInsync(clientId=214, port=4002, _debug=True)
 #con_thread.start()
 
 contract = IB.Contract()
-contract.symbol = "M6B"
-contract.secType = "FUT"
-contract.exchange = "CME"
-contract.currency = "USD"
-contract.lastTradeDateOrContractMonth ='20241216'
-contract.multiplier = "6250"
+contract.symbol = "USD"
+contract.secType = "CASH"
+contract.currency = "CAD"
+contract.exchange = "IDEALPRO"
 
 
 print(contract)
@@ -71,27 +69,28 @@ print(cds)
 assert len(cds)==1
 
 #starttime = ib.reqHeadTimeStamp(contract, 'Trades', 1, 1)
-endDateTime = datetime.datetime(2024, 11, 16)
+endDateTime = datetime.datetime(2024, 5, 16)
 #endDateTime = datetime.datetime.now().astimezone(datetime.timezone.utc)
 
-'''
+
 data0 = ib.reqHistoricalData(
         contract=contract,
-        endDateTime='',
-        durationStr='1 M',
-        barSizeSetting='1 min',
-        whatToShow='TRADES',
-        useRTH=1, #0 = Includes data outside of RTH | 1 = RTH data only 
+        endDateTime=endDateTime,
+        durationStr='3 M',
+        barSizeSetting='4 hours',
+        whatToShow='ASK',
+        useRTH=0, #0 = Includes data outside of RTH | 1 = RTH data only 
         formatDate = 1, 
         keepUpToDate = False, #0 = False | 1 = True
         chartOptions=[])
 
-'''
-data0 = ib.reqRealTimeBars(contract, 5, 'TRADES', False)
 
-print(f"totel data 2:{len(data0)}")
+# data0 = ib.reqRealTimeBars(contract, 5, 'TRADES', False)
+
+print(f"totel data :{len(data0)}")
 #ib.barUpdateEvent += onBarUpdate
 
+ib.reqPositions()
 #ib.sleep(300)
 #ib.cancelRealTimeBars(data0)
 #ib.disconnect()

@@ -86,7 +86,19 @@ class TradeApp(EWrapper, EClient):
             ", Volume: " , decimalMaxString(volume) ,
             ", Count: " , intMaxString(count) ,
             ", WAP: " , decimalMaxString(wap)
-            )
+        )
+
+    def position(self, account: str, contract: Contract, position: Decimal, avgCost: float):
+        print("Position.", "Account:", account, "Contract:", contract, "Position:", position, "Avg cost:", avgCost)
+        
+    def positionEnd(self):
+        print("PositionEnd")
+
+    def openOrder(self, orderId: OrderId, contract: Contract, order: Order, orderState: OrderState):
+        print(orderId, contract, order, orderState)
+    
+    def openOrderEnd(self):
+        print("OpenOrderEnd")
 
 def websocket_con():
     app.run()
@@ -130,10 +142,12 @@ app.connect("127.0.0.1", 4002, clientId=15)
 
 con_thread = threading.Thread(name='ibtest', target=websocket_con, daemon=True)
 con_thread.start()
-
-'''
 time.sleep(1)
 
+pos = app.reqPositions()
+time.sleep(1)
+print(pos)
+'''
 summary = app.reqAccountSummary(reqId=1, groupName='All', tags='NetLiquidation')
 
 #account = app.reqAccountUpdates(subscribe=True, acctCode='DU9965348')

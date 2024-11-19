@@ -28,27 +28,28 @@ import teststrategy
 import datetime as dt
 
 FROMDATE = dt.datetime(2014, 12, 1)
-TODATE = dt.datetime(2024, 10, 16)
+TODATE = dt.datetime(2024, 5, 16)
 ENDDATE = ''
 
-mircofut_symbols = [
+mircofut_hist_symbols = [
+    {'name':'GPBUSD', 'symbol':"CASH-GBP-USD-IDEALPRO"},
+    {'name':'AUDUSD', 'symbol':"CASH-AUD-USD-IDEALPRO"},
+    {'name':'EURUSD', 'symbol':"CASH-EUR-USD-IDEALPRO"},
+    {'name':'USDJPY', 'symbol':"CASH-USD-JPY-IDEALPRO"},
+    {'name':'USDCAD', 'symbol':"CASH-USD-CAD-IDEALPRO"},
+    {'name':'CHFUSD', 'symbol':"CASH-CHF-USD-IDEALPRO"},
+]
+
+'''
+mircofut_real_symbols = [
     {'name':'GPBUSD', 'symbol':"FUT-M6B-USD-CME-20241216-6250-False"},
     {'name':'AUDUSD', 'symbol':"FUT-M6A-USD-CME-20241216-10000-False"},
     {'name':'EURUSD', 'symbol':"FUT-M6E-USD-CME-20241216-12500-False"},
-    {'name':'JPYUSD', 'symbol':"FUT-MJY-USD-CME-20241216-1250000-False"},
+    {'name':'USDJPY', 'symbol':"FUT-MJY-USD-CME-20241216-1250000-False"},
     {'name':'CADUSD', 'symbol':"FUT-MCD-USD-CME-20241217-10000-False"},
     {'name':'CHFUSD', 'symbol':"FUT-MSF-USD-CME-20241216-12500-False"},
 ]
-             
-#   FUT-M6B-USD-CME-20241216-6250-False
-#   FUT-M6A-USD-CME-20241216-10000-False
-#   FUT-M6E-USD-CME-20241216-12500-False
-#   FUT-MJY-USD-CME-20241216-1250000-False
-#   FUT-MCD-USD-CME-20241217-10000-False
-#   FUT-MSF-USD-CME-20241216-12500-False
-
-
-""
+'''          
 
 '''
 other contract params: '1 D', '30 mins', 'Bid', formatDate=1, keepUpToDate=False
@@ -78,25 +79,25 @@ WAR-GOOG-EUR-FWB-20201117-001-15000-C
 '''
 
 def test_run(args=None):
-    cerebro = bt.Cerebro(stdstats=False)
+    # stdstats是观测器开关，True打开Broker(Cash&Value),Trades, Buy&Sell三个观测器。
+    # 后面在添加其他观测器。
+    cerebro = bt.Cerebro(stdstats=True) 
     store = bt.stores.IBStoreInsync(clientId=214, port=4002, _debug=True)
     
-    for fut_symbol in mircofut_symbols:
-        '''
+    for fut_symbol in mircofut_hist_symbols:
         data = bt.feeds.IBData(
             name=fut_symbol['name'],     # Data name
             dataname=fut_symbol['symbol'], # Symbol name
-            todate = '',
+            todate = TODATE,
             durationStr='3 M',
             barSizeSetting='4 hours',
             historical=True,
-            what='Trades',
+            what='Ask',
             useRTH=0,
             formatDate = 1,
             keepUpToDate = False,
         )
         '''
-
         data = bt.feeds.IBData(
                name=fut_symbol['name'], # Data name
                dataname=fut_symbol['symbol'], # Symbol name
@@ -106,12 +107,41 @@ def test_run(args=None):
                useRTH=False,
                rtbar=True
               )
-        
+        '''
         cerebro.adddata(data)
 
     cerebro.broker = store.getbroker()
     cerebro.addstrategy(teststrategy.St)
-    cerebro.run()
+
+    #添加佣金
+    cerebro.broker.setcommission(commission=0.001) 
+
+    #添加观测器指标
+    cerebro.addobserver(bt.observers.Benchmark)
+    cerebro.addobserver(bt.observers.TimeReturn)
+    cerebro.addobserver(bt.observers.DrawDown)
+    cerebro.addobserver(bt.observers.FundValue)
+    cerebro.addobserver(bt.observers.FundShares)
+
+
+    #添加分析指标，指标输出需要按时间段输出：按天，按周，按月，完成后输出(回测)
+    cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name='AnnualReturn')
+    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='TimeReturn')
+    cerebro.addanalyzer(bt.analyzers.SharpeRatio, riskfreerate=0.003, annualize=True, _name='SharpeRatio')
+    cerebro.addanalyzer(bt.analyzers.SharpeRatio_A, _name='SharpeRatio_A')
+    cerebro.addanalyzer(bt.analyzers.DrawDown, _name='DrawDown')
+    
+    strats=cerebro.run()
+
+    # 第一个策略结果输出
+    strat = strats[0]
+    print("--------------- AnnualReturn -----------------")
+    print(strat.analyzers.AnnualReturn.get_analysis())
+    print("--------------- SharpeRatio -----------------")
+    print(strat.analyzers.SharpeRatio.get_analysis())
+    print("--------------- DrawDown -----------------")
+    print(strat.analyzers.DrawDown.get_analysis())
+
     cerebro.plot()
 
 if __name__ == '__main__':
