@@ -1,33 +1,71 @@
-import ib_insync
-import logging
-import time
+#!/usr/bin/env python
+# -*- coding: utf-8; py-indent-offset:4 -*-
+###############################################################################
+#
+# Copyright (C) 2015-2023 Daniel Rodriguez
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+###############################################################################
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
-ib_insync.util.startLoop()
-ib_insync.util.logToConsole(logging.INFO)
+import datetime
+import os
+import pandas as pd
+import akshare as ak
+import matplotlib.pyplot as plt
 
-ib = ib_insync.IB()
-ib.connect(host='127.0.0.1', port=4002, clientId=11)
+# 添加模块所在目录的绝对路径,然后导入模块正常了。否则报错(未安装backtrader) 
+import sys
+sys.path.append(r'E:\gitcode\backtrader')
+import backtrader as bt
 
-contract = ib_insync.Contract()
-contract.symbol = "GOOG"
-contract.secType = "STK"
-contract.exchange = "SMART"
-contract.currency = "USD"
+class teststrategy(bt.Strategy):
+    def __init__(self):
+        self.dataclose = self.datas[0].close
+        self.dataopen = self.datas[0].open
+        self.datalow = self.datas[0].low
+        self.datahigh = self.datas[0].high
 
-print(contract)
-cds = ib.reqContractDetails(contract)
-assert len(cds)==1
+        self.ma5 = bt.indicators.SMA(self.dataclose, period=5)
+        self.ma10 = bt.indicators.SMA(self.dataclose, period=10)
+        self.ma20 = bt.indicators.SMA(self.dataclose, period=20)
+        self.MACD = bt.indicators.MACD(self.datas[0])
+        self.macd = self.MACD.macd
+        self.signal = self.MACD.signal
+        self.rsi = bt.indicators.RSI(self.datas[0])
+        self.boll = bt.indicators.BollingerBands(self.datas[0])
+        self.atr = bt.indicators.ATR(self.datas[0])
+        self.order = None
+        self.buyprice = None
+        self.comm = None
 
-data0 = ib.reqHistoricalData(
-        contract=contract,
-        endDateTime='',
-        durationStr='1 M',
-        barSizeSetting='1 day',
-        whatToShow='Trades',
-        useRTH=0, #0 = Includes data outside of RTH | 1 = RTH data only 
-        formatDate = 1, 
-        keepUpToDate = True, #0 = False | 1 = True
-        chartOptions=[])
+    def log(self, txt, dt=None):
+        dt = dt or self.datas[0].datetime.date(0)
+        print('%s, %s' % (dt.isoformat(), txt))
 
 
-print('hello world')
+if __name__ == '__main__':
+    cerebro = bt.Cerebro()
+    cerebro.broker.set_cash(1000000)
+    cerebro.broker.setcommission(0.003)
+
+    data = None
+    cerebro.adddata(data)
+    cerebro.addstrategy(teststrategy)
+    cerebro.run(runonce=False)
+    print('final value', cerebro.broker.getvalue())
+    cerebro.plot(sytle='candle')
+    plt.show()
