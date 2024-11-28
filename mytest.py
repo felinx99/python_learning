@@ -26,18 +26,22 @@ import testcommon
 import backtrader as bt
 import teststrategy
 import datetime as dt
+import os
+import os.path
 
-FROMDATE = dt.datetime(2014, 12, 1)
-TODATE = dt.datetime(2024, 5, 16)
+basepath = r'E:\data\CASH'
+
+FROMDATE = dt.datetime(2023, 1, 1, 0, 0, 0)
+TODATE = dt.datetime(2023, 1, 31, 23, 59, 59)
 ENDDATE = ''
 
 mircofut_hist_symbols = [
     {'name':'GPBUSD', 'symbol':"CASH-GBP-USD-IDEALPRO"},
-    {'name':'AUDUSD', 'symbol':"CASH-AUD-USD-IDEALPRO"},
-    {'name':'EURUSD', 'symbol':"CASH-EUR-USD-IDEALPRO"},
-    {'name':'USDJPY', 'symbol':"CASH-USD-JPY-IDEALPRO"},
-    {'name':'USDCAD', 'symbol':"CASH-USD-CAD-IDEALPRO"},
-    {'name':'CHFUSD', 'symbol':"CASH-CHF-USD-IDEALPRO"},
+#    {'name':'AUDUSD', 'symbol':"CASH-AUD-USD-IDEALPRO"},
+#    {'name':'EURUSD', 'symbol':"CASH-EUR-USD-IDEALPRO"},
+#    {'name':'USDJPY', 'symbol':"CASH-USD-JPY-IDEALPRO"},
+#    {'name':'USDCAD', 'symbol':"CASH-USD-CAD-IDEALPRO"},
+#    {'name':'CHFUSD', 'symbol':"CASH-CHF-USD-IDEALPRO"},
 ]
 
 '''
@@ -83,8 +87,10 @@ def test_run(args=None):
     # 后面在添加其他观测器。
     cerebro = bt.Cerebro(stdstats=True) 
     store = bt.stores.IBStoreInsync(clientId=214, port=4002, _debug=True)
+    cerebro.addstore(store)
     
     for fut_symbol in mircofut_hist_symbols:
+        '''
         data = bt.feeds.IBData(
             name=fut_symbol['name'],     # Data name
             dataname=fut_symbol['symbol'], # Symbol name
@@ -97,6 +103,30 @@ def test_run(args=None):
             formatDate = 1,
             keepUpToDate = False,
         )
+        '''
+
+        #生成文件路径
+        fullpath = os.path.join(basepath, fut_symbol['name'], 'MIDPOINT')
+
+        #生成文件名称
+        filename = 'CASH_' + fut_symbol['name'] + '_4_hours_MIDPOINT' + '.csv'
+
+        #生成文件完整路径+名称
+        fullFileName = os.path.join(fullpath, filename)
+        print(f"fullFileName: {fullFileName}")
+
+        # Create the 1st data
+        data = bt.feeds.IBCSVData(
+            dataname=fullFileName,
+            datainfo=fut_symbol['symbol'], #to create precontract
+            fromdate=FROMDATE,
+            todate=TODATE,
+            timeframe=bt.TimeFrame.Days,
+            compression=1,
+            sessionstart=FROMDATE,  # internally just the "time" part will be used
+            sessionend=TODATE,  # internally just the "time" part will be used
+        )
+
         '''
         data = bt.feeds.IBData(
                name=fut_symbol['name'], # Data name

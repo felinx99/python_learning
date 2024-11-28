@@ -24,10 +24,10 @@ class St(bt.Strategy):
             txt = []
             txt.append('{}'.format(len(self)))
             txt.append('{}'.format(self.data.datetime.datetime(0).isoformat()))
-            txt.append(' open BID: ' + '{}'.format(self.datas[0].open[0]))
-            txt.append(' high BID: ' + '{}'.format(self.datas[0].high[0]))
-            txt.append(' low BID: ' + '{}'.format(self.datas[0].low[0]))
-            txt.append(' close BID: ' + '{}'.format(self.datas[0].close[0]))
+            txt.append(' open: ' + '{}'.format(self.datas[0].open[0]))
+            txt.append(' high: ' + '{}'.format(self.datas[0].high[0]))
+            txt.append(' low: ' + '{}'.format(self.datas[0].low[0]))
+            txt.append(' close: ' + '{}'.format(self.datas[0].close[0]))
             txt.append(' volume: ' + '{:.2f}'.format(self.data.volume[0]))
             print(','.join(txt))
         else:
@@ -87,10 +87,11 @@ class St(bt.Strategy):
 
     def next(self):   
         # Simply log the closing price of the series from the reference
-        self.log(onlydata=True)
+        #self.log(onlydata=True)
         
         # Check if an order is pending ... if yes, we cannot send a 2nd one
         if self.order:
+            print(f"crossover: {self.crossover}")
             return
 
         # Check if we are in the market
