@@ -1,5 +1,0 @@
-2024-11-01 12:43:56.366 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 37197...
-2024-11-01 12:43:56.368 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
-2024-11-01 12:44:00.374 - INFO    - MainThread - client.py:230 [disconnect] - Disconnecting
-2024-11-01 12:44:00.375 - ERROR   - MainThread - client.py:222 [connectAsync] - API connection failed: TimeoutError()
-2024-11-01 12:44:00.376 - INFO    - MainThread - client.py:368 [_onSocketDisconnected] - Disconnected.

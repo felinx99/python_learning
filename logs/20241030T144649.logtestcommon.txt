@@ -1,4 +1,0 @@
-2024-10-30 14:46:33.396 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 65131...
-2024-10-30 14:46:35.435 - INFO    - MainThread - client.py:230 [disconnect] - Disconnecting
-2024-10-30 14:46:35.435 - ERROR   - MainThread - client.py:222 [connectAsync] - API connection failed: ConnectionRefusedError(22, '远程计算机拒绝网络连接。', None, 1225, None)
-2024-10-30 14:46:35.437 - ERROR   - MainThread - client.py:225 [connectAsync] - Make sure API port on TWS/IBG is open

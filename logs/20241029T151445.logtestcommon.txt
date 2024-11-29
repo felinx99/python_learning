@@ -1,9 +1,0 @@
-2024-10-29 15:14:18.504 - INFO    - MainThread - client.py:204 [connectAsync] - Connecting to 127.0.0.1:7497 with clientId 1252...
-2024-10-29 15:14:18.507 - INFO    - MainThread - client.py:212 [connectAsync] - Connected
-2024-10-29 15:14:18.514 - INFO    - MainThread - client.py:341 [_onSocketHasData] - Logged on to server version 176
-2024-10-29 15:14:18.516 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfuture
-2024-10-29 15:14:18.516 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2104, reqId -1: Market data farm connection is OK:usfarm
-2024-10-29 15:14:18.517 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2106, reqId -1: HMDS data farm connection is OK:ushmds
-2024-10-29 15:14:18.517 - INFO    - MainThread - wrapper.py:1111 [error] - Warning 2158, reqId -1: Sec-def data farm connection is OK:secdefhk
-2024-10-29 15:14:18.518 - INFO    - MainThread - client.py:218 [connectAsync] - API connection ready
-2024-10-29 15:14:18.921 - INFO    - MainThread - ib.py:1789 [connectAsync] - Synchronization complete
