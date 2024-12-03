@@ -10,16 +10,16 @@ import numpy as np
 # Import the backtrader platform
 import backtrader as bt
 from backtrader import TimeFrame
-from .util import commission, observers, analyzers
+from .util import observers
 from .util import universe as universe_util
-
+from .util import cerebor
 
 def get_filepath(ticker):
-    basepath = os.path.join(os.path.dirname(__file__), '../data/cash/')
+    basepath = os.path.join(os.path.dirname(__file__), '../data/stk/')
     #生成文件路径
-    data_path = os.path.join(basepath, ticker, 'MIDPOINT')
+    data_path = os.path.join(basepath, ticker, 'TRADES')
     #生成文件名称
-    filename = 'CASH_' + ticker + '_1_day_MIDPOINT' + '.csv'
+    filename = 'STK_' + ticker + '_1_day_TRADES' + '.csv'
     #生成文件完整路径+名称
     fullFileName = os.path.join(data_path, filename)
 
@@ -57,8 +57,8 @@ def run_backtest_offline(strategy, tickers=None, start='1900-01-01', end='2100-0
     module = importlib.import_module(module_path, 'backtest')
     strategy = getattr(module, strategy)
 
-    cerebro = bt.Cerebro(
-        stdstats=not plotreturns,
+    cerebro = cerebor.NewCerebro(
+        stdstats=True,
         cheat_on_open=strategy.params.cheat_on_open
     )
 
@@ -71,6 +71,7 @@ def run_backtest_offline(strategy, tickers=None, start='1900-01-01', end='2100-0
     for ticker in tickers:
 
         data = bt.feeds.IBCSVOnlyData(
+            name = ticker,
             dataname=get_filepath(ticker),
             fromdate=start_date,
             todate=end_date,
@@ -85,9 +86,14 @@ def run_backtest_offline(strategy, tickers=None, start='1900-01-01', end='2100-0
 
         cerebro.adddata(data)
 
+    # Set WriterFile output
+    writerFile = r'E:\gitcode\python_learning\logs\bt-writer\writer.csv'
+    cerebro.addwriter(bt.WriterFile, out=writerFile, csv=True, csv_counter=True, rounding=2, indent=4)
+
     # Set initial cash amount and commision
     cerebro.broker.setcash(cash)
-    cerebro.broker.setcommission(0.003)
+    cerebro.broker.addcommissioninfo(bt.commissions.IBCommInfo(commtype=bt.commissions.IBCommInfo.COMM_STOCK))
+    cerebro.broker.set_slippage_perc(perc=0.005, slip_open=True, slip_match=False)
 
     # Add obervers
     if plotreturns:
@@ -102,7 +108,7 @@ def run_backtest_offline(strategy, tickers=None, start='1900-01-01', end='2100-0
                         riskfreerate=strategy.params.riskfreerate,
                         annualize=True,
                         **comkwargs)
-    cerebro.addanalyzer(analyzers.Sortino, _name='Sortino',
+    cerebro.addanalyzer(bt.analyzers.Sortino, _name='Sortino',
                         riskfreerate=strategy.params.riskfreerate,
                         annualize=True,
                         **comkwargs)
@@ -122,8 +128,7 @@ def run_backtest_offline(strategy, tickers=None, start='1900-01-01', end='2100-0
     # Print results
     start_value = cash
     end_value = cerebro.broker.getvalue()
-    print('Starting Portfolio Value:\t{:.2f}'.format(cash))
-    print('Final Portfolio Value:\t\t{:.2f}'.format(end_value))
+
 
     # Get analysis results
     drawdown = results[0].analyzers.LatinDance.get_analysis()
@@ -131,7 +136,7 @@ def run_backtest_offline(strategy, tickers=None, start='1900-01-01', end='2100-0
     ar = results[0].analyzers.AnnualReturn.get_analysis()
     gagr = list(results[0].analyzers.TimeReturn.get_analysis().values())[0]
     sharpe = results[0].analyzers.SharpeRatio.get_analysis()['sharperatio']
-    sortino = results[0].analyzers.Sortino.get_analysis()['sortino']
+    sortino = results[0].analyzers.Sortino.get_analysis()['sortinoratio']
     positions = results[0].analyzers.PositionsValue.get_analysis()
     sqn = results[0].analyzers.SQN.get_analysis()
     vwr = list(results[0].analyzers.VWR.get_analysis().values())[0]
@@ -141,18 +146,21 @@ def run_backtest_offline(strategy, tickers=None, start='1900-01-01', end='2100-0
     avg_leverage = np.mean([abs(i) for i in leverage.values()])
 
     sharpe = 'None' if sharpe is None else round(sharpe, 5)
+    print("--------------- 结果输出 -----------------")
+    print('Starting Portfolio Value:\t{:.2f}'.format(cash))
+    print('Final Portfolio Value:\t\t{:.2f}'.format(end_value))
     print('ROI:\t\t{:.2f}%'.format(100.0 * ((end_value / start_value) - 1.0)))
     analyzer_results = []
-    analyzer_results.append('Max Drawdown:\t{:.2f}'.format(drawdown['max']['drawdown']))
     analyzer_results.append('CAGR:\t\t{:.2f}'.format(cagr))
+    analyzer_results.append('Max Drawdown:\t{:.2f}'.format(drawdown['max']['drawdown']))
     analyzer_results.append('Sharpe:\t\t{}'.format(sharpe))
     analyzer_results.append('Sortino:\t{:.5f}'.format(sortino))
     analyzer_results.append('Positions:\t{:.5f}'.format(avg_positions))
     analyzer_results.append('Leverage:\t{:.5f}'.format(avg_leverage))
     print('\n'.join(analyzer_results))
 
-    print("--------------- 结果输出 -----------------")
-    print(f'总收益率(gross return ratio): {100*gagr:.2f}%')
+
+    print(f'投资回报率(ROI): {100*gagr:.2f}%')
     print(f'复合年均增长率(CAGR Compound Annual Growth Rate): {cagr:.2f}%')
     for year, var in ar.items():
         print(f"\t{year}年化收益率(annual return ratio): {100*var:.2f}%")

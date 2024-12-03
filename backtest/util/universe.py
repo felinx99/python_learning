@@ -22,7 +22,7 @@ class SP500(Universe):
 
 class FAANG(Universe):
     def __init__(self):
-        tickers = ['FB', 'AAPL', 'AMZN', 'NFLX', 'GOOG']
+        tickers = ['META', 'AAPL', 'AMZN', 'NFLX', 'GOOG']
         super().__init__(tickers)
 
 
