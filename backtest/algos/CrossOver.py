@@ -18,7 +18,6 @@ class CrossOver(base.Strategy):
         for i, d in enumerate(self.datas):
             d.order = None
             d.order_rejected = False
-            bt.indicators.Indicator.set_csv(True)
             d.ema5 = bt.indicators.EMA(d, period=5)
             d.ema20 = bt.indicators.EMA(d, period=20)
             d.buysell = bt.indicators.CrossOver(d.ema5, d.ema20, plot=True)
@@ -39,7 +38,7 @@ class CrossOver(base.Strategy):
                 closevalue = 0
                 if self.getposition(d):
                     self.log('CLOSE SHORT(SELL) , %.2f' % price)
-                    self.close(data=d, tradeid=d.curtradeid)
+                    #self.close(data=d, tradeid=d.curtradeid)
                     closevalue = d.order.size * price
 
                 self.log('BUY CREATE, {:.2f}'.format(price))
@@ -47,21 +46,21 @@ class CrossOver(base.Strategy):
                 targetvalue = split_target * (self.broker.getcash()+closevalue) 
                 
                 size = comminfo.getsize(price, targetvalue)
-                d.order = self.buy(data=d, size=size, price=price)
+                #d.order = self.buy(data=d, size=size, price=price)
                 d.order_rejected = False
 
             if d.buysell < 0:
                 closevalue = 0
                 if self.getposition(d):
                     self.log('CLOSE LONG(BUY) , %.2f' % price)
-                    self.close(data=d, tradeid=d.curtradeid)
+                    #self.close(data=d, tradeid=d.curtradeid)
                     closevalue = d.order.size * price
 
                 self.log('SELL CREATE , %.2f' % price)
                 d.curtradeid = next(d.tradeid)
                 targetvalue = -split_target * (self.broker.getcash()+closevalue) 
                 size = comminfo.getsize(price, targetvalue)
-                d.order = self.sell(data=d, size=size, price=price)
+                #d.order = self.sell(data=d, size=size, price=price)
                 d.order_rejected = False
 
             '''

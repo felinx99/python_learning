@@ -1,5 +1,5 @@
+import itertools
 import backtrader as bt
-
 
 class Strategy(bt.Strategy):
     """
@@ -25,6 +25,12 @@ class Strategy(bt.Strategy):
             date = date or self.data.datetime.date(0)
             print('{}, {}'.format(date.isoformat(), txt))
 
+    def _stop(self):
+        self.stop()
+
+        for analyzer in itertools.chain(self.analyzers, self._slave_analyzers):
+            analyzer._stop()
+
     def notify_order(self, order):
         if order.status in [order.Submitted, order.Accepted]:
             # Buy/Sell order submitted/accepted to/by broker - Nothing to do
@@ -34,17 +40,19 @@ class Strategy(bt.Strategy):
         # Attention: broker could reject order if not enought cash
         if order.status in [order.Completed]:
             if order.isbuy():
-                self.log('BUY {}\t{:.2f}\t  Cost: {:.2f}\tComm: {:.2f}'.format(
+                self.log('BUY {}\tprice {:.2f}\tsize {:.2f}\tCost: {:.2f}\tComm: {:.2f}'.format(
                     order.data._name,
                     order.executed.price,
+                    order.executed.size,
                     order.executed.value,
                     order.executed.comm))
                 self.buyprice = order.executed.price
                 self.buycomm = order.executed.comm
             if order.issell():
-                self.log('SELL {}\t{:.2f}\t  Cost: {:.2f}\tComm: {:.2f}'.format(
+                self.log('SELL {}\tprice {:.2f}\tsize{:.2f}\t Cost: {:.2f}\tComm: {:.2f}'.format(
                     order.data._name,
                     order.executed.price,
+                    order.executed.size,
                     order.executed.value,
                     order.executed.comm))
 

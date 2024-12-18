@@ -1,10 +1,12 @@
-import backtrader as bt
 import datetime
+import threading
+import multiprocessing
 import sys
 import matplotlib.pyplot as plt
 import os
-import pandas as pd
 from jinja2 import Environment, FileSystemLoader
+
+import backtrader as bt
 
 def timestamp2str(ts):
     """ Converts Timestamp object to str containing date and time
@@ -285,13 +287,25 @@ class PerformanceReport:
         return self.stratbt.broker.startingcash
 
 
+
 class NewCerebro(bt.Cerebro):
+    
+    params = (
+        ('onlinemode', False),
+    )
+
     def __init__(self, **kwds):
         super().__init__(**kwds)
         #self.add_report_analyzers()
         self.dailytimer = self.add_timer(when=datetime.time(12,00), repeat=datetime.timedelta(minutes=5),)
         self.weeklytimer = self.add_timer(bt.timer.SESSION_END, weekday=[1,3], weekcarry=True)
         self.monthlytimer = self.add_timer(bt.timer.SESSION_END, monthdays=[1], monthcarry=True)
+
+        self._stopThreadRunOnlineData_event = threading.Event()
+        self._startThreadRunOnlineData_event = threading.Event()
+
+        self._stopThreadOnTimer_event = threading.Event()
+        self._startThreadOnTimer_event = threading.Event()
 
     def add_report_analyzers(self, riskfree=0.01):
             """ Adds performance stats, required for report
@@ -321,24 +335,156 @@ class NewCerebro(bt.Cerebro):
         rpt.generate_pdf_report()
 
     def notify_timer(self, timer, when, *args, **kwargs):
-        print('strategy notify_timer with tid {}, when {} cheat {}'.
-              format(timer.p.tid, when, timer.p.cheat))
-        _, isowk, isowkday = self.datetime.date().isocalendar()
+        #print('strategy notify_timer with tid {}, when {} cheat {}'.
+        #      format(timer.p.tid, when, timer.p.cheat))
+        _, isowk, isowkday = self.cerebordatetime.date().isocalendar()
 
         if timer == self.dailytimer:
-            txt = 'dailytimer {}, {}, Week {}, Day {}'.format(
-            len(self), self.datetime.datetime(),
-            isowk, isowkday,)
-            print(txt)
+            txt = 'dailytimer {}, Week {}, Day {}'.format(
+            self.cerebordatetime, isowk, isowkday,)
+            #print(txt)
         elif timer == self.weeklytimer:
-            txt = 'weeklytimer {}, {}, Week {}, Day {}'.format(
-            len(self), self.datetime.datetime(),
-            isowk, isowkday,)
-            print(txt)
+            txt = 'weeklytimer{}, Week {}, Day {}'.format(
+            self.cerebordatetime, isowk, isowkday,)
+            #print(txt)
         elif timer == self.monthlytimer:
-            txt = 'monthlytimer {}, {}, Week {}, Day {}'.format(
-            len(self), self.datetime.datetime(),
-            isowk, isowkday,)
-            print(txt)
+            txt = 'monthlytimer{}, Week {}, Day {}'.format(
+            self.cerebordatetime,isowk, isowkday,)
+            #print(txt)
         else:
-            print("run in notify_timer, no timer match")
+            pass
+            #print("run in notify_timer, no timer match")
+    
+    def stop_barupdate(self):
+        self._stopThreadRunOnlineData_event.set()
+
+    def start_barupdate(self):
+        self._startThreadRunOnlineData_event.set()
+
+    def stop_onTimer(self):
+        self._stopThreadOnTimer_event.set()
+
+    def start_onTimer(self):
+        self._startThreadOnTimer_event.set()
+    
+    def _RunOnlineData(self, **kwargs):
+        self._event_stop = False  # Stop is requested
+
+        if not self.datas:
+            return []  # nothing can be run
+
+        pkeys = self.params._getkeys()
+        for key, val in kwargs.items():
+            if key in pkeys:
+                setattr(self.params, key, val)
+
+        while not self._stopThreadRunOnlineData_event.is_set():
+            # 等待信号
+            self._startThreadRunOnlineData_event.wait()
+            
+            # 信号触发，执行代码
+            # print("Signal received, executing code...")
+            # self._runnext(self.runningstrats)
+            for strat in self.runningstrats:
+                strat._next()
+       
+            # 重置信号标志，准备下次等待
+            self._startThreadRunOnlineData_event.clear() 
+        '''
+        iterstrats = itertools.product(*self.strats)
+        if not self._dooptimize or self.p.maxcpus == 1:
+            # If no optimmization is wished ... or 1 core is to be used
+            # let's skip process "spawning"
+            for iterstrat in iterstrats:
+                runstrat = self.runstrategies(iterstrat)
+                self.runstrats.append(runstrat)
+                if self._dooptimize:
+                    for cb in self.optcbs:
+                        cb(runstrat)  # callback receives finished strategy
+        else:
+            if self.p.optdatas and self._dopreload and self._dorunonce:
+                for data in self.datas:
+                    data.reset()
+                    if self._exactbars < 1:  # datas can be full length
+                        data.extend(size=self.params.lookahead)
+                    data._start()
+                    if self._dopreload:
+                        data.preload()
+
+            pool = multiprocessing.Pool(self.p.maxcpus or None)
+            for r in pool.imap(self, iterstrats):
+                self.runstrats.append(r)
+                for cb in self.optcbs:
+                    cb(r)  # callback receives finished strategy
+
+            pool.close()
+
+            if self.p.optdatas and self._dopreload and self._dorunonce:
+                for data in self.datas:
+                    data.stop()
+
+        if not self._dooptimize:
+            # avoid a list of list for regular cases
+            return self.runstrats[0]
+        '''
+        return self.runstrats
+
+    def _DealOnTimer(self, **kwargs):
+        print("run in DealOnTimer")
+        while not self._stopThreadOnTimer_event.is_set():
+            # 等待信号
+            self._startThreadOnTimer_event.wait()
+            
+            # 信号触发，执行代码
+            print("Signal received, executing code...")
+       
+            # 重置信号标志，准备下次等待
+            self._startThreadOnTimer_event.clear() 
+            
+    def _run_online_start(self, **kwargs):
+        # 创建新线程1，用于处理新数据
+        run_onlineData_thread = threading.Thread(target=self._RunOnlineData, kwargs=kwargs, name='RunOnlineDataThread')
+        run_onlineData_thread.start()
+        # 创建新线程2， 用于处理定时器响应on_timer
+        onTimer_thread = threading.Thread(target=self._DealOnTimer, kwargs=kwargs, name='OnTimerThread')
+        onTimer_thread.start() 
+
+    def run_online(self, **kwargs):
+        self._run_online_start(**kwargs)   
+        return None 
+    
+    def run(self, **kwargs):
+        '''The core method to perform backtesting. Any ``kwargs`` passed to it
+        will affect the value of the standard parameters ``Cerebro`` was
+        instantiated with.
+
+        If ``cerebro`` has not datas the method will immediately bail out.
+
+        It has two different execution modes:
+            Offline Mode: The data length is fixed. For all data, the strategy
+                completes all calculations in a single run and returns the 
+                result.
+                Explanation: In offline mode, the system processes all 
+                            available data at once without waiting for new data
+                            to arrive. This is typically used when the dataset
+                            is complete and there's no need for real-time updates.
+            Online Mode: The data length is infinite. New data is acquired in
+                real time. The strategy initially completes calculations on the
+                existing data and then suspends until new data arrives. When new
+                data is generated, the strategy performs calculations on it. The
+                calculation results are output periodically using a timer function.
+                Explanation: In online mode, the system continuously processes
+                            data as it becomes available. The strategy starts
+                            with the initial dataset and then updates its
+                            calculations whenever new data is received. This
+                            mode is suitable for applications that require
+                            real-time analysis or continuous monitoring.
+        '''
+        rets = super().run(**kwargs)
+        onlinemode = kwargs.get('onlinemode', False)
+
+        if onlinemode:
+            print(f"rets: {rets}")
+            self.run_online(**kwargs)
+
+        return rets

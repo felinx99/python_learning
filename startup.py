@@ -1,4 +1,3 @@
-import time
 # 添加模块所在目录的绝对路径,然后导入模块正常了。否则报错(未安装backtrader) 
 import sys
 sys.path.append(r'E:\gitcode\backtrader')
@@ -12,15 +11,18 @@ from backtest import run
     # start: '2020-01-01'
     # end: '2020-01-01'
     # kwargs: Invalid, Additional arguments to pass through to the strategy
+
+strategy_args = dict(
+    cheat_on_open = False,
+)
 runkwargs = dict(
     strategy='CrossOver',
-    tickers= ['AAPL'],
+    tickers= ['EURUSD', 'GBPUSD',],
     start='2020-09-01',
     end='2021-12-31',
-    plot=True,
-    verbose = True,
+    plot=False,
+    verbose = False,
+    kwargs=strategy_args,
 )
 
-run.run_backtest_offline(**runkwargs)
-while True:
-    time.sleep(1)
+run.run_realtime(**runkwargs)
