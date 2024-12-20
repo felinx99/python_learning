@@ -4,6 +4,7 @@ import queue
 import time
 import multiprocessing
 import sys
+import itertools
 import matplotlib.pyplot as plt
 import os
 from jinja2 import Environment, FileSystemLoader
@@ -373,7 +374,7 @@ class NewCerebro(bt.Cerebro):
     def start_onTimer(self):
         self._startThreadOnTimer_event.set()
     
-    def _RunOnlineData(self, **kwargs):
+    def _RunOnlineData(self):
         while not self._stopThreadRunOnlineData_event.is_set():
             # 等待信号
             try:
@@ -390,8 +391,7 @@ class NewCerebro(bt.Cerebro):
                 #等待数据集齐
                 if hasDataAlready:
                     print(f"数据集齐，开始处理数据")
-                    for strat in self.runningstrats:
-                        strat._next()
+                    self.runstrategieskenel()
        
             except queue.Empty: # 重置信号标志，准备下次等待
                 print("队列为空，消费者等待...")
@@ -400,7 +400,7 @@ class NewCerebro(bt.Cerebro):
        
         return self.runstrats
 
-    def _DealOnTimer(self, **kwargs):
+    def _DealOnTimer(self):
         print("run in DealOnTimer")
         while not self._stopThreadOnTimer_event.is_set():
             # 等待信号
@@ -412,19 +412,26 @@ class NewCerebro(bt.Cerebro):
             # 重置信号标志，准备下次等待
             self._startThreadOnTimer_event.clear() 
             
-    def _run_online_start(self, **kwargs):
+    def _run_online_start(self):
         # 创建新线程1，用于处理新数据
-        run_onlineData_thread = threading.Thread(target=self._RunOnlineData, kwargs=kwargs, name='RunOnlineDataThread')
+        run_onlineData_thread = threading.Thread(target=self._RunOnlineData, name='RunOnlineDataThread')
         run_onlineData_thread.start()
         # 创建新线程2， 用于处理定时器响应on_timer
-        onTimer_thread = threading.Thread(target=self._DealOnTimer, kwargs=kwargs, name='OnTimerThread')
+        onTimer_thread = threading.Thread(target=self._DealOnTimer, name='OnTimerThread')
         onTimer_thread.start() 
 
-    def run_online(self, **kwargs):
+    def run_online(self):
         #kwargs['predata'] = True    #在线方式，默认提前加载数据
         #kwargs['preload'] = True    #在线方式，默认提前加载数据
-        self._run_online_start(**kwargs) 
+        self._run_online_start() 
         return None 
+    
+
+    def runstrategies(self, iterstrat, predata=False):
+        self.prerunstrategies(iterstrat=iterstrat, predata=predata)
+        self.runstrategieskenel()
+        #self.finishrunstrategies(predata=predata)
+        return self.runningstrats
     
     def run(self, **kwargs):
         '''The core method to perform backtesting. Any ``kwargs`` passed to it
@@ -453,10 +460,19 @@ class NewCerebro(bt.Cerebro):
                             mode is suitable for applications that require
                             real-time analysis or continuous monitoring.
         '''
-        rets = super().run(**kwargs) 
+        
         
         onlinemode = kwargs.get('onlinemode', False)          
         if onlinemode:
-            self.run_online(**kwargs) 
+            self.prerun(**kwargs)
+            self.startrun()
+            #self.finishrun()
+            self.run_online() 
+            if not self._dooptimize:
+                # avoid a list of list for regular cases
+                rets = self.runstrats[0]
+            rets = self.runstrats
+        else:
+            rets = super().run(**kwargs)
         
         return rets
