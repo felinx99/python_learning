@@ -1,5 +1,7 @@
 import datetime
 import threading
+import queue
+import time
 import multiprocessing
 import sys
 import matplotlib.pyplot as plt
@@ -296,16 +298,20 @@ class NewCerebro(bt.Cerebro):
 
     def __init__(self, **kwds):
         super().__init__(**kwds)
-        #self.add_report_analyzers()
+        self.cerebordatetime = datetime.datetime.now()  #用于判断定时器的时间
+
         self.dailytimer = self.add_timer(when=datetime.time(12,00), repeat=datetime.timedelta(minutes=5),)
         self.weeklytimer = self.add_timer(bt.timer.SESSION_END, weekday=[1,3], weekcarry=True)
         self.monthlytimer = self.add_timer(bt.timer.SESSION_END, monthdays=[1], monthcarry=True)
 
         self._stopThreadRunOnlineData_event = threading.Event()
-        self._startThreadRunOnlineData_event = threading.Event()
-
+        
         self._stopThreadOnTimer_event = threading.Event()
         self._startThreadOnTimer_event = threading.Event()
+
+        self._stopThreadRunOnlineData_semaphore = threading.Semaphore(0) 
+
+    
 
     def add_report_analyzers(self, riskfree=0.01):
             """ Adds performance stats, required for report
@@ -358,8 +364,8 @@ class NewCerebro(bt.Cerebro):
     def stop_barupdate(self):
         self._stopThreadRunOnlineData_event.set()
 
-    def start_barupdate(self):
-        self._startThreadRunOnlineData_event.set()
+    def start_barupdate(self, item=None, timeout=1):   
+        self._stopThreadRunOnlineData_semaphore.release()
 
     def stop_onTimer(self):
         self._stopThreadOnTimer_event.set()
@@ -368,65 +374,30 @@ class NewCerebro(bt.Cerebro):
         self._startThreadOnTimer_event.set()
     
     def _RunOnlineData(self, **kwargs):
-        self._event_stop = False  # Stop is requested
-
-        if not self.datas:
-            return []  # nothing can be run
-
-        pkeys = self.params._getkeys()
-        for key, val in kwargs.items():
-            if key in pkeys:
-                setattr(self.params, key, val)
-
         while not self._stopThreadRunOnlineData_event.is_set():
             # 等待信号
-            self._startThreadRunOnlineData_event.wait()
+            try:
+                self._stopThreadRunOnlineData_semaphore.acquire()
             
-            # 信号触发，执行代码
-            # print("Signal received, executing code...")
-            # self._runnext(self.runningstrats)
-            for strat in self.runningstrats:
-                strat._next()
+                # 信号触发，对齐数据
+                datas = sorted(self.datas,
+                       key=lambda x: len(x), reverse=True)
+                data0 = datas[0]
+                d0ret = sum(len(d) == len(data0) for d in datas)
+
+                hasDataAlready = not d0ret or d0ret == len(datas)
+
+                #等待数据集齐
+                if hasDataAlready:
+                    print(f"数据集齐，开始处理数据")
+                    for strat in self.runningstrats:
+                        strat._next()
        
-            # 重置信号标志，准备下次等待
-            self._startThreadRunOnlineData_event.clear() 
-        '''
-        iterstrats = itertools.product(*self.strats)
-        if not self._dooptimize or self.p.maxcpus == 1:
-            # If no optimmization is wished ... or 1 core is to be used
-            # let's skip process "spawning"
-            for iterstrat in iterstrats:
-                runstrat = self.runstrategies(iterstrat)
-                self.runstrats.append(runstrat)
-                if self._dooptimize:
-                    for cb in self.optcbs:
-                        cb(runstrat)  # callback receives finished strategy
-        else:
-            if self.p.optdatas and self._dopreload and self._dorunonce:
-                for data in self.datas:
-                    data.reset()
-                    if self._exactbars < 1:  # datas can be full length
-                        data.extend(size=self.params.lookahead)
-                    data._start()
-                    if self._dopreload:
-                        data.preload()
-
-            pool = multiprocessing.Pool(self.p.maxcpus or None)
-            for r in pool.imap(self, iterstrats):
-                self.runstrats.append(r)
-                for cb in self.optcbs:
-                    cb(r)  # callback receives finished strategy
-
-            pool.close()
-
-            if self.p.optdatas and self._dopreload and self._dorunonce:
-                for data in self.datas:
-                    data.stop()
-
-        if not self._dooptimize:
-            # avoid a list of list for regular cases
-            return self.runstrats[0]
-        '''
+            except queue.Empty: # 重置信号标志，准备下次等待
+                print("队列为空，消费者等待...")
+                time.sleep(1)
+            
+       
         return self.runstrats
 
     def _DealOnTimer(self, **kwargs):
@@ -450,7 +421,9 @@ class NewCerebro(bt.Cerebro):
         onTimer_thread.start() 
 
     def run_online(self, **kwargs):
-        self._run_online_start(**kwargs)   
+        #kwargs['predata'] = True    #在线方式，默认提前加载数据
+        #kwargs['preload'] = True    #在线方式，默认提前加载数据
+        self._run_online_start(**kwargs) 
         return None 
     
     def run(self, **kwargs):
@@ -480,11 +453,10 @@ class NewCerebro(bt.Cerebro):
                             mode is suitable for applications that require
                             real-time analysis or continuous monitoring.
         '''
-        rets = super().run(**kwargs)
-        onlinemode = kwargs.get('onlinemode', False)
-
+        rets = super().run(**kwargs) 
+        
+        onlinemode = kwargs.get('onlinemode', False)          
         if onlinemode:
-            print(f"rets: {rets}")
-            self.run_online(**kwargs)
-
+            self.run_online(**kwargs) 
+        
         return rets

@@ -24,11 +24,11 @@ mircofut_real_symbols = {
 }
 
 def get_filepath(ticker):
-    basepath = os.path.join(os.path.dirname(__file__), '../data/stk/')
+    basepath = os.path.join(os.path.dirname(__file__), '../data/cash/')
     #生成文件路径
-    data_path = os.path.join(basepath, ticker, 'TRADES')
+    data_path = os.path.join(basepath, ticker, 'MIDPOINT')
     #生成文件名称
-    filename = 'STK_' + ticker + '_4_hours_TRADES' + '.csv'
+    filename = 'CASH_' + ticker + '_4_hours_MIDPOINT' + '.csv'
     #生成文件完整路径+名称
     fullFileName = os.path.join(data_path, filename)
 
@@ -157,6 +157,18 @@ def show_analyzers_reslut(results=[], start_value=0, end_value=0):
 def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', cash=100000.0,
                  verbose=False, plot=False, plotreturns=False, universe=None, exclude=[],
                  kwargs=None):
+    module_path = f'.algos.{strategy}'
+    module = importlib.import_module(module_path, 'backtest')
+    strategy = getattr(module, strategy)
+    
+    cerebro = cerebor.NewCerebro(
+        stdstats=True,
+        cheat_on_open=strategy.params.cheat_on_open
+    )
+
+    # Add a strategy
+    cerebro.addstrategy(strategy, verbose=verbose)
+    
     start_date = dateutil.parser.isoparse(start)
     end_date = dateutil.parser.isoparse(end)
 
@@ -166,19 +178,6 @@ def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', c
         tickers = [a for a in u.assets if a not in exclude]
 
     tickers = clean_tickers(tickers, start_date, end_date)
-
-    module_path = f'.algos.{strategy}'
-    module = importlib.import_module(module_path, 'backtest')
-    strategy = getattr(module, strategy)
-
-    cerebro = cerebor.NewCerebro(
-        stdstats=True,
-        cheat_on_open=strategy.params.cheat_on_open
-    )
-
-    # Add a strategy
-    cerebro.addstrategy(strategy, verbose=verbose)
-    
     start_time = datetime.datetime(start_date.year, start_date.month, start_date.day)
     end_time = datetime.datetime.combine(end_date, datetime.time(23, 59, 59))
     # Set up data feed
@@ -218,7 +217,7 @@ def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', c
     add_analyzers(cerebro, strategy.params.riskfreerate)
 
     # Run backtest
-    results = cerebro.run(preload=False, onlinemode=True)
+    results = cerebro.run(preload=False, onlinemode=False)
 
     # Show analyzers result
     show_analyzers_reslut(results, cash, cerebro.broker.getvalue())
@@ -231,14 +230,10 @@ def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', c
 def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01', 
                  verbose=False, plot=False, plotreturns=False, universe=None, 
                  exclude=[], kwargs=None):
-    if universe:
-        u = universe_util.get(universe)()
-        tickers = [a for a in u.assets if a not in exclude]
-
     module_path = f'.algos.{strategy}'
     module = importlib.import_module(module_path, 'backtest')
     strategy = getattr(module, strategy)
-
+    
     cerebro = cerebor.NewCerebro(
         stdstats=True,
         cheat_on_open=strategy.params.cheat_on_open
@@ -251,6 +246,9 @@ def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01',
     # Add a strategy
     cerebro.addstrategy(strategy, verbose=verbose)
     
+    if universe:
+        u = universe_util.get(universe)()
+        tickers = [a for a in u.assets if a not in exclude]
     # Set up data feed
     for ticker in tickers:
         data = bt.feeds.IBData(
@@ -292,10 +290,9 @@ def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01',
 
     cash = cerebro.broker.get_cash()
     # Run backtest
-    results = cerebro.run(preload=False, onlinemode = True)
+    results = cerebro.run(preload=False, onlinemode=True)
 
-    while True:
-        store.sleep(1)
+    store.run()
 
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser()
@@ -329,4 +326,4 @@ if __name__ == '__main__':
     if EXCLUDE:
         STRATEGY_ARGS['exclude'] = [EXCLUDE] if len(EXCLUDE) == 1 else EXCLUDE
 
-    run_realtime(**STRATEGY_ARGS)
+    run_backtest(**STRATEGY_ARGS)

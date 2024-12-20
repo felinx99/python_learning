@@ -33,7 +33,8 @@ class CrossOver(base.Strategy):
             split_target = self.params.target_percent * self.weights[i]
             comminfo = self.broker.getcommissioninfo(d)
             price = d.close[0]
-
+            #print(f'deal with next date[{d.datetime[0]:.6f}]')
+              
             if d.buysell > 0:
                 closevalue = 0
                 if self.getposition(d):
