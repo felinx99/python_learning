@@ -6,6 +6,58 @@ This is my repo for backtesting algorithmic trading strategies.
 
 Implemented with Backtrader in Python.
 
+'''
+## 调用说明
+
+支持回测和交易两种使用模式。
+
+回测模式：针对有限数据集，进行策略回测，输出回测结果。支持单策略测试，多策略测试和策略调优。
+
+            -有限数据集一般指数据文件，有限长度在线数据如历史数据。
+
+            -回测结果包含指标数据，图表展示，结果文件
+
+            -多策略测试一般用于策略对比，一个为基准策略，其他为对比策略。
+
+            -策略调优一般用于策略参数优化，指定参数范围，步长，输出最优参数。
+
+交易模式：针对实时交易数据，执行策略进行实盘交易。支持实盘交易，策略报告输出。
+
+            -实时交易数据一般指在线数据，如实时行情和实时历史数据。数据无限长,且由交易平台提供。
+
+            -实盘交易包含下单，撤单，成交，回报等。
+
+            -策略报告输出包含策略表现，成交记录，回报记录等。
+'''
+
+## 参数说明
+
+run_mode: 回测模式：'backtest', 交易模式：'living_trading', 'paper_trading'
+
+data_type: 回测模式下两种: file,historical_limit,
+
+          交易模式下两种: realtime, hitsorical_update
+
+
+### Arguments:
+
+| Arg          | Flag           | Possible Values             | Description                                                                                 |
+| ------------ | -------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
+| running mode | runmode        | backtest,living_trading,etc | running mode
+| strategy     |                | BuyAndHold, CrossOver, etc. | Choose from the list of algorithms in the ./backtest/algos/. The arg value is the filename. |
+| tickers      | -t, --tickers  | SPY, AAPL, etc.             | A list of tickers to use.                                                                   |
+| universe     | -u, --universe | sp500, faang, etc.          | Find the list of uniuverses in ./backtest/utils/universe.py    
+| data type    | -d, --datatype | file, historical_limit, etc.| Choose for description data source type
+| start        | -s, --start    | 2010, 2010-01-01            | Starting date of the                              |
+| start        | -s, --start    | 2010, 2010-01-01            | Starting date of the backtest                                                               |
+| end          | -e, --end      | 2022, 2021-12-31            | End date for backtest                                                                       |
+| cash         | --cash         | 100000                      | Starting cash balance                                                                       |
+| verbose      | -v, --verbose  |                             | Show verbose details of all trades                                                          |
+| plot         | -p, --plot     |                             | Show the full plot                                                                          |
+| plot returns | --plotreturns  |                             | Only plot the returns                                                                       |
+| kwargs       | -k, --kwargs   |                             | Additional arguments to pass through to the strategy                                        |
+
+
 ## Run a backtest
 
 ```
@@ -18,20 +70,6 @@ python -m backtest.run BuyAndHold -t SPY -s 2010
 backtest.run <strategy> -t <tickers list> ...
 ```
 
-### Arguments:
-
-| Arg          | Flag           | Possible Values             | Description                                                                                 |
-| ------------ | -------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
-| strategy     |                | BuyAndHold, CrossOver, etc. | Choose from the list of algorithms in the ./backtest/algos/. The arg value is the filename. |
-| tickers      | -t, --tickers  | SPY, AAPL, etc.             | A list of tickers to use.                                                                   |
-| universe     | -u, --universe | sp500, faang, etc.          | Find the list of uniuverses in ./backtest/utils/universe.py                                 |
-| start        | -s, --start    | 2010, 2010-01-01            | Starting date of the backtest                                                               |
-| end          | -e, --end      | 2022, 2021-12-31            | End date for backtest                                                                       |
-| cash         | --cash         | 100000                      | Starting cash balance                                                                       |
-| verbose      | -v, --verbose  |                             | Show verbose details of all trades                                                          |
-| plot         | -p, --plot     |                             | Show the full plot                                                                          |
-| plot returns | --plotreturns  |                             | Only plot the returns                                                                       |
-| kwargs       | -k, --kwargs   |                             | Additional arguments to pass through to the strategy                                        |
 
 ## Tools
 

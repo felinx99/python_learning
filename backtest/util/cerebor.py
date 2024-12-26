@@ -294,7 +294,7 @@ class PerformanceReport:
 class NewCerebro(bt.Cerebro):
     
     params = (
-        ('onlinemode', False),
+        ('run_mode', 'backtest'),
     )
 
     def __init__(self, **kwds):
@@ -468,8 +468,10 @@ class NewCerebro(bt.Cerebro):
                             mode is suitable for applications that require
                             real-time analysis or continuous monitoring.
         '''
-               
-        if self.onlinemode:
+        
+        
+        run_mode = kwargs.get('run_mode')          
+        if run_mode != 'backtest':
             self.prerun(**kwargs)
             self.startrun()
             self.run_online() 
