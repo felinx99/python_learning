@@ -294,7 +294,7 @@ class PerformanceReport:
 class NewCerebro(bt.Cerebro):
     
     params = (
-        ('onlinemode', False),
+        ('run_mode', 'backtest'),
     )
 
     def __init__(self, **kwds):
@@ -462,8 +462,8 @@ class NewCerebro(bt.Cerebro):
         '''
         
         
-        onlinemode = kwargs.get('onlinemode', False)          
-        if onlinemode:
+        run_mode = kwargs.get('run_mode')          
+        if run_mode != 'backtest':
             self.prerun(**kwargs)
             self.startrun()
             #self.finishrun()

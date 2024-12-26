@@ -60,8 +60,11 @@ def clean_tickers(tickers, start, end):
 
     return out_tickers
 
-def add_analyzers(cerebro=None, riskfreerate=0.5):
+def add_analyzers(cerebro=None, **kwargs):
     # Add analyzers
+    riskfreerate = kwargs.get('riskfreerate', 0.035)
+    plotreturns = kwargs.get('plotreturns', False)
+
     comkwargs = dict(
         timeframe=bt.TimeFrame.Days, 
         compression=1,
@@ -83,6 +86,16 @@ def add_analyzers(cerebro=None, riskfreerate=0.5):
     cerebro.addanalyzer(bt.analyzers.SQN, _name='SQN')
     cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name='TradeAnalyzer')
     cerebro.addanalyzer(bt.analyzers.VWR, _name='VWR', **comkwargs)
+
+        #添加观测器指标
+    if plotreturns:
+        cerebro.addobserver(observers.Value)    #自定义观测器
+        cerebro.addobserver(bt.observers.Benchmark)
+        cerebro.addobserver(bt.observers.TimeReturn)
+        cerebro.addobserver(bt.observers.DrawDown)
+        cerebro.addobserver(bt.observers.FundValue)
+        cerebro.addobserver(bt.observers.FundShares)
+
 
 def show_analyzers_reslut(results=[], start_value=0, end_value=0):
     # Get analysis results
@@ -293,19 +306,178 @@ def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01',
     results = cerebro.run(preload=False, onlinemode=True)
 
     store.run()
+def adddata(cerebro=None, **kwargs):
+    data_type = kwargs.get('datatype')
+    assert data_type in ['file', 'historical_limit', 'realtime', 'hitsorical_update']
+
+    start = kwargs.get('start')
+    end = kwargs.get('end')
+    tickers = kwargs.get('tickers', None)
+    universe = kwargs.get('universe', None)
+    exclude = kwargs.get('exclude', None)
+    plotreturns = kwargs.get('plotreturns', False)
+    
+    tickers = tickers if (tickers or universe) else ['SPY']
+    if universe:
+        u = universe_util.get(universe)()
+        tickers = [a for a in u.assets if a not in exclude]
+
+    if data_type == 'file':
+        start_date = dateutil.parser.isoparse(start)
+        end_date = dateutil.parser.isoparse(end)
+
+        tickers = clean_tickers(tickers, start_date, end_date)
+        start_time = datetime.datetime(start_date.year, start_date.month, start_date.day)
+        end_time = datetime.datetime.combine(end_date, datetime.time(23, 59, 59))
+        # Set up data feed
+        for ticker in tickers:
+
+            data = bt.feeds.IBCSVOnlyData(
+                name = ticker,
+                dataname=get_filepath(ticker),
+                fromdate=start_date,
+                todate=end_date,
+                imeframe=bt.TimeFrame.Minutes,
+                compression=240,
+                sessionstart=start_time,  # internally just the "time" part will be used
+                sessionend=end_time,  # internally just the "time" part will be used
+                reverse=False,
+                adjclose=False,
+                plot=not plotreturns,
+            )
+
+            cerebro.adddata(data)
+    elif data_type == 'historical_limit':
+        # Set up data feed
+        for ticker in tickers:
+            data = bt.feeds.IBData(
+                name=ticker,     # Data name
+                dataname=mircofut_real_symbols[ticker], # Symbol name
+                todate = '',
+                durationStr='1 D',
+                barSizeSetting='1 min',
+                historical=True,
+                what='Midpoint',
+                useRTH=0,
+                formatDate = 1,
+                keepUpToDate = False,
+            )
+
+            cerebro.adddata(data)
+    elif data_type == 'hitsorical_update':
+        for ticker in tickers:
+            data = bt.feeds.IBData(
+                name=ticker,     # Data name
+                dataname=mircofut_real_symbols[ticker], # Symbol name
+                todate = '',
+                durationStr='1 D',
+                barSizeSetting='1 min',
+                historical=True,
+                what='Midpoint',
+                useRTH=0,
+                formatDate = 1,
+                keepUpToDate = True,
+            )
+
+            cerebro.adddata(data)
+    elif data_type == 'realtime':
+        for ticker in tickers:
+            data = bt.feeds.IBData(
+                name=ticker,     # Data name
+                dataname=mircofut_real_symbols[ticker], # Symbol name
+                todate = '',
+                durationStr='1 D',
+                barSizeSetting='1 min',
+                historical=False,
+                what='Midpoint',
+                useRTH=0,
+                formatDate = 1,
+                keepUpToDate = True,
+            )
+
+            cerebro.adddata(data)
+
+def run(**kwargs):
+    run_mode = kwargs.pop('runmode', 'backtest')
+    assert run_mode in ['backtest', 'living_trading', 'paper_trading']
+    
+    strategy = kwargs.pop('strategy', 'CrossOver')
+    module_path = f'.algos.{strategy}'
+    module = importlib.import_module(module_path, 'backtest')
+    strategy = getattr(module, strategy)
+
+    broker = kwargs.pop('broker', 'BackBroker' if run_mode == 'backtest' else 'IBBroker')
+    try:
+        module_path = 'backtrader'
+        module = importlib.import_module(module_path)
+        broker = getattr(module.brokers, broker)
+    except (ImportError, AttributeError) as e:
+        print(f"Error importing BackBroker: {e}")
+        return None
+
+    cerebro = cerebor.NewCerebro(
+        stdstats=True,
+        cheat_on_open=kwargs.get('cheat_on_open', False)
+    )
+
+    if run_mode != 'backtest':
+        store = bt.stores.IBStoreInsync(clientId=214, port=4002, _debug=True)
+        cerebro.addstore(store)
+        cerebro.broker = broker
+
+    # Add a strategy
+    cerebro.addstrategy(strategy, verbose=kwargs.get('verbose', True))
+
+
+    adddata(cerebro, **kwargs)
+
+    # Set WriterFile output
+    writerFile = r'E:\gitcode\python_learning\logs\bt-writer\writer.csv'
+    cerebro.addwriter(bt.WriterFile, out=writerFile, csv=True, csv_counter=True, rounding=2, indent=4)
+
+    if run_mode == 'backtest':
+        cash = kwargs.get('cash', 100000.0)
+        # Set initial cash amount and commision
+        cerebro.broker.setcash(cash)
+        cerebro.broker.addcommissioninfo(bt.commissions.IBCommInfo(commtype=bt.commissions.IBCommInfo.COMM_STOCK))
+        cerebro.broker.set_slippage_perc(perc=0.005, slip_open=True, slip_match=False)
+    else:
+        cash = cerebro.broker.get_cash()
+        #添加佣金
+        cerebro.broker.setcommission(commission=0.001)
+    
+    # Add analyzers
+    add_analyzers(cerebro, **kwargs)
+
+    # Run backtest
+    results = cerebro.run(preload=False, run_mode=run_mode)
+
+    # Show analyzers result
+    show_analyzers_reslut(results, cash, cerebro.broker.getvalue())
+
+    # Plot results
+    plot = kwargs.get('plot', False)
+    if run_mode == 'backtest':
+        if plot:
+            cerebro.plot()
+    else:
+        store.run()
+
 
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser()
+    PARSER.add_argument('runmode', nargs=1)
     PARSER.add_argument('strategy', nargs=1)
     PARSER.add_argument('-t', '--tickers', nargs='+')
     PARSER.add_argument('-u', '--universe', nargs=1)
+    PARSER.add_argument('-d', '--datatype', nargs=1)
     PARSER.add_argument('-x', '--exclude', nargs='+')
     PARSER.add_argument('-s', '--start', nargs=1)
     PARSER.add_argument('-e', '--end', nargs=1)
     PARSER.add_argument('--cash', nargs=1, type=int)
     PARSER.add_argument('-v', '--verbose', action='store_true')
-    PARSER.add_argument('-p', '--plot', action='store_true')
-    PARSER.add_argument('--plotreturns', action='store_true')
+    PARSER.add_argument('-p', '--plot', action='store_false')
+    PARSER.add_argument('--plotreturns', action='store_false')
     PARSER.add_argument('-k', '--kwargs', nargs='+')
     ARGS = PARSER.parse_args()
     ARG_ITEMS = vars(ARGS)
@@ -320,10 +492,10 @@ if __name__ == '__main__':
 
     # Remove None values
     STRATEGY_ARGS = {k: (v[0] if isinstance(v, list) else v) for k, v in ARG_ITEMS.items() if v}
-    STRATEGY_ARGS['tickers'] = TICKERS
-    STRATEGY_ARGS['kwargs'] = KWARGS
+    STRATEGY_ARGS['tickers'] = [ticker.strip() for ticker in TICKERS[0].split(',')]
+    STRATEGY_ARGS['kwargs'] = dict(item.split('=') for item in KWARGS[0].split(','))
 
     if EXCLUDE:
         STRATEGY_ARGS['exclude'] = [EXCLUDE] if len(EXCLUDE) == 1 else EXCLUDE
 
-    run_backtest(**STRATEGY_ARGS)
+    run(**STRATEGY_ARGS)
