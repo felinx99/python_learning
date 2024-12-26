@@ -6,7 +6,7 @@ from . import BaseStrategy as base
 
 class CrossOver(base.Strategy):
     params = {
-        'target_percent': 0.80
+        'target_percent': 0.90
     }
 
     def __init__(self):
@@ -33,36 +33,73 @@ class CrossOver(base.Strategy):
             split_target = self.params.target_percent * self.weights[i]
             comminfo = self.broker.getcommissioninfo(d)
             price = d.close[0]
-            #print(f'deal with next date[{d.datetime[0]:.6f}]')
-              
+            possize = self.getposition(d).position
+            
+            #开仓必须使用BKT bracketOrder 套利单
+            #平仓必须使用LMT limitOrder 限价单
             if d.buysell > 0:
                 closevalue = 0
-                if self.getposition(d):
+                takeProfitPrice = f"{price*1.05:.4f}"
+                stopLossPrice = f"{price*0.95:.4f}"
+                if possize:
                     self.log('CLOSE SHORT(SELL) , %.2f' % price)
                     #self.close(data=d, tradeid=d.curtradeid)
+                    d.order = self.close(data=d,
+                                         size=possize,
+                                         lmtPrice=price,
+                                         orderType='LMT',
+                                         tif='DAY',
+                                         tradeid=d.curtradeid,
+                                         pseudosubmit=True)
                     closevalue = d.order.size * price
-
+                
                 self.log('BUY CREATE, {:.2f}'.format(price))
                 d.curtradeid = next(d.tradeid)
-                targetvalue = split_target * (self.broker.getcash()+closevalue) 
-                
+                targetvalue = split_target * (self.broker.getcash()+closevalue)                 
                 size = comminfo.getsize(price, targetvalue)
-                #d.order = self.buy(data=d, size=size, price=price)
+                d.order = self.buy(data=d, 
+                                    size=size, 
+                                    lmtPrice=price, 
+                                    takeProfitPrice=takeProfitPrice, 
+                                    stopLossPrice=stopLossPrice, 
+                                    orderType='BKT', 
+                                    tif='GTC',
+                                    tradeid=d.curtradeid,
+                                    pseudosubmit=True)
                 d.order_rejected = False
+
 
             if d.buysell < 0:
                 closevalue = 0
-                if self.getposition(d):
+                takeProfitPrice = f"{price*0.95:.4f}"
+                stopLossPrice = f"{price*1.05:.4f}"
+                if possize:
                     self.log('CLOSE LONG(BUY) , %.2f' % price)
-                    #self.close(data=d, tradeid=d.curtradeid)
+                    d.order = self.close(data=d, 
+                                         size=possize, 
+                                         lmtPrice=price,
+                                         orderType='LMT', 
+                                         tif='DAY',
+                                         tradeid=d.curtradeid,
+                                         pseudosubmit=True)
                     closevalue = d.order.size * price
 
                 self.log('SELL CREATE , %.2f' % price)
                 d.curtradeid = next(d.tradeid)
                 targetvalue = -split_target * (self.broker.getcash()+closevalue) 
                 size = comminfo.getsize(price, targetvalue)
-                #d.order = self.sell(data=d, size=size, price=price)
+
+                d.order = self.sell(data=d, 
+                                    size=size, 
+                                    lmtPrice=price, 
+                                    takeProfitPrice=takeProfitPrice,
+                                    stopLossPrice=stopLossPrice, 
+                                    orderType='BKT', 
+                                    tif='GTC',
+                                    tradeid=d.curtradeid,
+                                    pseudosubmit=True)
                 d.order_rejected = False
+
 
             '''
             if not self.getposition(d):

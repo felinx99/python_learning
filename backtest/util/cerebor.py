@@ -300,6 +300,7 @@ class NewCerebro(bt.Cerebro):
     def __init__(self, **kwds):
         super().__init__(**kwds)
         self.cerebordatetime = datetime.datetime.now()  #用于判断定时器的时间
+        self.onlinemode = self.p.onlinemode
 
         self.dailytimer = self.add_timer(when=datetime.time(12,00), repeat=datetime.timedelta(minutes=5),)
         self.weeklytimer = self.add_timer(bt.timer.SESSION_END, weekday=[1,3], weekcarry=True)
@@ -428,10 +429,17 @@ class NewCerebro(bt.Cerebro):
     
 
     def runstrategies(self, iterstrat, predata=False):
-        self.prerunstrategies(iterstrat=iterstrat, predata=predata)
-        self.runstrategieskenel()
-        #self.finishrunstrategies(predata=predata)
-        return self.runningstrats
+        if self.onlinemode:
+            self.prerunstrategies(iterstrat=iterstrat, predata=predata)
+            self.runstrategieskenel()
+            #self.finishrunstrategies(predata=predata)
+            runstrats = self.runningstrats
+
+            for strat in runstrats:
+                strat._stop()
+            return self.runningstrats
+        else:
+            return super().runstrategies(iterstrat, predata)
     
     def run(self, **kwargs):
         '''The core method to perform backtesting. Any ``kwargs`` passed to it
@@ -460,18 +468,13 @@ class NewCerebro(bt.Cerebro):
                             mode is suitable for applications that require
                             real-time analysis or continuous monitoring.
         '''
-        
-        
-        onlinemode = kwargs.get('onlinemode', False)          
-        if onlinemode:
+               
+        if self.onlinemode:
             self.prerun(**kwargs)
             self.startrun()
-            #self.finishrun()
             self.run_online() 
-            if not self._dooptimize:
-                # avoid a list of list for regular cases
-                rets = self.runstrats[0]
-            rets = self.runstrats
+            
+            rets = self.runstrats[0] if not self._dooptimize else self.runstrats
         else:
             rets = super().run(**kwargs)
         

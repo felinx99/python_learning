@@ -163,7 +163,7 @@ def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', c
     
     cerebro = cerebor.NewCerebro(
         stdstats=True,
-        cheat_on_open=strategy.params.cheat_on_open
+        cheat_on_open=strategy.params.cheat_on_open,
     )
 
     # Add a strategy
@@ -188,8 +188,8 @@ def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', c
             dataname=get_filepath(ticker),
             fromdate=start_date,
             todate=end_date,
-            imeframe=bt.TimeFrame.Minutes,
-            compression=240,
+            timeframe=bt.TimeFrame.Minutes,
+            compression=1,
             sessionstart=start_time,  # internally just the "time" part will be used
             sessionend=end_time,  # internally just the "time" part will be used
             reverse=False,
@@ -217,7 +217,7 @@ def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', c
     add_analyzers(cerebro, strategy.params.riskfreerate)
 
     # Run backtest
-    results = cerebro.run(preload=False, onlinemode=False)
+    results = cerebro.run()
 
     # Show analyzers result
     show_analyzers_reslut(results, cash, cerebro.broker.getvalue())
@@ -227,6 +227,7 @@ def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', c
     if plot:
         cerebro.plot()
 
+
 def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01', 
                  verbose=False, plot=False, plotreturns=False, universe=None, 
                  exclude=[], kwargs=None):
@@ -234,12 +235,15 @@ def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01',
     module = importlib.import_module(module_path, 'backtest')
     strategy = getattr(module, strategy)
     
+    onlinemode = kwargs.get('onlinemode', False)
     cerebro = cerebor.NewCerebro(
         stdstats=True,
-        cheat_on_open=strategy.params.cheat_on_open
+        cheat_on_open=kwargs.get('cheat_on_open', False),
+        onlinemode=onlinemode,
     )
 
-    store = bt.stores.IBStoreInsync(clientId=214, port=4002, _debug=True)
+    #port gw.live=4001 gw.paper=4002 tws.live=7496 tws.paper=7497
+    store = bt.stores.IBStoreInsync(clientId=214, port=7497, _debug=True)
     cerebro.addstore(store)
     cerebro.broker = store.getbroker()
 
@@ -257,11 +261,13 @@ def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01',
             todate = '',
             durationStr='1 D',
             barSizeSetting='1 min',
+            timeframe=bt.TimeFrame.Minutes,
+            compression=60,
             historical=True,
             what='Midpoint',
             useRTH=0,
             formatDate = 1,
-            keepUpToDate = True,
+            keepUpToDate = True if onlinemode else False,
         )
 
         cerebro.adddata(data)
@@ -269,9 +275,6 @@ def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01',
     # Set WriterFile output
     writerFile = r'E:\gitcode\python_learning\logs\bt-writer\writer.csv'
     cerebro.addwriter(bt.WriterFile, out=writerFile, csv=True, csv_counter=True, rounding=2, indent=4)
-
-    #添加佣金
-    cerebro.broker.setcommission(commission=0.001) 
 
     #添加观测器指标
     if plotreturns:
@@ -281,7 +284,6 @@ def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01',
         cerebro.addobserver(bt.observers.DrawDown)
         cerebro.addobserver(bt.observers.FundValue)
         cerebro.addobserver(bt.observers.FundShares)
-        cerebro.broker.addcommissioninfo(bt.commissions.IBCommInfo(commtype=bt.commissions.IBCommInfo.COMM_STOCK))
         cerebro.broker.set_slippage_perc(perc=0.005, slip_open=True, slip_match=False)
 
 
@@ -290,9 +292,13 @@ def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01',
 
     cash = cerebro.broker.get_cash()
     # Run backtest
-    results = cerebro.run(preload=False, onlinemode=True)
+    results = cerebro.run(preload=False)
 
-    store.run()
+    # Show analyzers result
+    show_analyzers_reslut(results, cash, cerebro.broker.getvalue())
+
+    if onlinemode:
+        store.run()
 
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser()

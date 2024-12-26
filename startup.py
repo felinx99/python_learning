@@ -48,15 +48,16 @@ class PrintOverride:
     # kwargs: Invalid, Additional arguments to pass through to the strategy
 
 strategy_args = dict(
-    cheat_on_open = False,
+    cheat_on_open = True,
+    onlinemode = True,
 )
 runkwargs = dict(
     strategy='CrossOver',
-    tickers= ['EURUSD','GBPUSD','USDJPY'],
+    tickers= ['EURUSD',],
     start='2020-09-01',
     end='2021-12-31',
     plot=False,
-    verbose = False,
+    verbose = True,
     kwargs=strategy_args,
 )
 
