@@ -30,11 +30,11 @@ class CrossOver(base.Strategy):
             split_target = self.target_percent * self.weights[i]
             comminfo = self.broker.getcommissioninfo(d)
             price = d.close[0]
-            possize = self.getposition(d).position
+            possize = self.getposition(d).size
             
             if d.buysell > 0:
-                takeProfitPrice = f"{price*1.05:.4f}"
-                stopLossPrice = f"{price*0.95:.4f}"
+                takeProfitPrice = round(price*1.5, 4)
+                stopLossPrice = round(price*0.85,4)
                 if possize:
                     self.close(data=d,
                                size=possize,
@@ -44,22 +44,27 @@ class CrossOver(base.Strategy):
                                tradeid=d.curtradeid)
                     break
                 
-                
                 d.curtradeid = next(d.tradeid)
                 targetvalue = split_target * self.broker.getcash()                 
                 size = comminfo.getsize(price, targetvalue)
-                self.buy(data=d,
+                #self.buy(data=d,
+                #         size=size,
+                #         lmtPrice=price,
+                #         takeProfitPrice=takeProfitPrice,
+                #         stopLossPrice=stopLossPrice,
+                #         orderType='BKT',
+                #         tif='GTC',
+                #         tradeid=d.curtradeid)
+                self.buy_bracket(data=d,
                          size=size,
-                         lmtPrice=price,
-                         takeProfitPrice=takeProfitPrice,
-                         stopLossPrice=stopLossPrice,
-                         orderType='BKT',
-                         tif='GTC',
+                         price=price,
+                         limitprice=takeProfitPrice,
+                         stopprice=stopLossPrice,
                          tradeid=d.curtradeid)
   
             if d.buysell < 0:
-                takeProfitPrice = f"{price*0.95:.4f}"
-                stopLossPrice = f"{price*1.05:.4f}"
+                takeProfitPrice = round(price*0.85,4)
+                stopLossPrice = round(price*1.5,4)
                 if possize:
                     
                     self.close(data=d,
@@ -76,11 +81,18 @@ class CrossOver(base.Strategy):
                 targetvalue = -split_target * self.broker.getcash()
                 size = comminfo.getsize(price, targetvalue)
 
-                self.sell(data=d,
-                          size=size,
-                          lmtPrice=price,
-                          takeProfitPrice=takeProfitPrice,
-                          stopLossPrice=stopLossPrice,
-                          orderType='BKT',
-                          tif='GTC',
-                          tradeid=d.curtradeid)
+                #self.sell(data=d,
+                #          size=size,
+                #          lmtPrice=price,
+                #          takeProfitPrice=takeProfitPrice,
+                #          stopLossPrice=stopLossPrice,
+                #          orderType='BKT',
+                #          tif='GTC',
+                #          tradeid=d.curtradeid)
+                self.sell_bracket(data=d,
+                         size=size,
+                         price=price,
+                         limitprice=takeProfitPrice,
+                         stopprice=stopLossPrice,
+                         tradeid=d.curtradeid)
+

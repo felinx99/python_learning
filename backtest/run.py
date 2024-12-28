@@ -290,7 +290,8 @@ def run(**kwargs):
         cerebro.broker = store.getbroker()
 
     # Add a strategy
-    cerebro.addstrategy(strategy, verbose=kwargs.get('verbose', True))
+    strat_kwargs = kwargs.get('kwargs', {})
+    cerebro.addstrategy(strategy, verbose=kwargs.get('verbose', True), **strat_kwargs)
 
 
     adddata(cerebro, **kwargs)
@@ -342,7 +343,8 @@ if __name__ == '__main__':
     PARSER.add_argument('-v', '--verbose', action='store_true')
     PARSER.add_argument('-p', '--plot', action='store_false')
     PARSER.add_argument('--plotreturns', action='store_false')
-    PARSER.add_argument('-k', '--kwargs', nargs='+')
+    PARSER.add_argument('-k', '--kwargs', required=False, default='',
+                        metavar='kwargs', help='kwargs in key=value format for strategy')
     ARGS = PARSER.parse_args()
     ARG_ITEMS = vars(ARGS)
 
@@ -357,7 +359,7 @@ if __name__ == '__main__':
     # Remove None values
     STRATEGY_ARGS = {k: (v[0] if isinstance(v, list) else v) for k, v in ARG_ITEMS.items() if v}
     STRATEGY_ARGS['tickers'] = [ticker.strip() for ticker in TICKERS[0].split(',')]
-    STRATEGY_ARGS['kwargs'] = dict(item.split('=') for item in KWARGS[0].split(','))
+    STRATEGY_ARGS['kwargs'] = eval('dict(' + KWARGS + ')')
 
     if EXCLUDE:
         STRATEGY_ARGS['exclude'] = [EXCLUDE] if len(EXCLUDE) == 1 else EXCLUDE
