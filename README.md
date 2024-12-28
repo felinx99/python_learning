@@ -8,6 +8,7 @@ Implemented with Backtrader in Python.
 
 '''
 ## 调用说明
+AIzaSyAArtu952QWf37FrAp4qygPA8sTmuwQJCU
 
 支持回测和交易两种使用模式。
 
@@ -32,9 +33,9 @@ Implemented with Backtrader in Python.
 
 ## 参数说明
 
-run_mode: 回测模式：'backtest', 交易模式：'living_trading', 'paper_trading'
+runmode: 回测模式：'backtest', 交易模式：'living_trading', 'paper_trading'
 
-data_type: 回测模式下两种: file,historical_limit,
+datatype: 回测模式下两种: file,historical_limit,
 
           交易模式下两种: realtime, hitsorical_update
 

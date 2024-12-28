@@ -294,13 +294,13 @@ class PerformanceReport:
 class NewCerebro(bt.Cerebro):
     
     params = (
-        ('run_mode', 'backtest'),
+        ('runmode', None),
     )
 
     def __init__(self, **kwds):
         super().__init__(**kwds)
         self.cerebordatetime = datetime.datetime.now()  #用于判断定时器的时间
-        self.onlinemode = self.p.onlinemode
+        self.runmode = self.p.runmode
 
         self.dailytimer = self.add_timer(when=datetime.time(12,00), repeat=datetime.timedelta(minutes=5),)
         self.weeklytimer = self.add_timer(bt.timer.SESSION_END, weekday=[1,3], weekcarry=True)
@@ -429,7 +429,9 @@ class NewCerebro(bt.Cerebro):
     
 
     def runstrategies(self, iterstrat, predata=False):
-        if self.onlinemode:
+        if self.runmode == 'backtest':
+            return super().runstrategies(iterstrat, predata)
+        else:
             self.prerunstrategies(iterstrat=iterstrat, predata=predata)
             self.runstrategieskenel()
             #self.finishrunstrategies(predata=predata)
@@ -438,8 +440,6 @@ class NewCerebro(bt.Cerebro):
             for strat in runstrats:
                 strat._stop()
             return self.runningstrats
-        else:
-            return super().runstrategies(iterstrat, predata)
     
     def run(self, **kwargs):
         '''The core method to perform backtesting. Any ``kwargs`` passed to it
@@ -470,8 +470,8 @@ class NewCerebro(bt.Cerebro):
         '''
         
         
-        run_mode = kwargs.get('run_mode')          
-        if run_mode != 'backtest':
+        runmode = kwargs.get('runmode')          
+        if runmode != 'backtest':
             self.prerun(**kwargs)
             self.startrun()
             self.run_online() 

@@ -167,154 +167,9 @@ def show_analyzers_reslut(results=[], start_value=0, end_value=0):
           f'空单最大单次亏损(max lost):{tradeanalyzer['short']['pnl']['lost']['max']}, '
           f'空单最大单次盈利(max profit):{tradeanalyzer['short']['pnl']['won']['max']}')
     
-def run_backtest(strategy, tickers=None, start='1900-01-01', end='2100-01-01', cash=100000.0,
-                 verbose=False, plot=False, plotreturns=False, universe=None, exclude=[],
-                 kwargs=None):
-    module_path = f'.algos.{strategy}'
-    module = importlib.import_module(module_path, 'backtest')
-    strategy = getattr(module, strategy)
-    
-    cerebro = cerebor.NewCerebro(
-        stdstats=True,
-        cheat_on_open=strategy.params.cheat_on_open,
-    )
-
-    # Add a strategy
-    cerebro.addstrategy(strategy, verbose=verbose)
-    
-    start_date = dateutil.parser.isoparse(start)
-    end_date = dateutil.parser.isoparse(end)
-
-    tickers = tickers if (tickers or universe) else ['SPY']
-    if universe:
-        u = universe_util.get(universe)()
-        tickers = [a for a in u.assets if a not in exclude]
-
-    tickers = clean_tickers(tickers, start_date, end_date)
-    start_time = datetime.datetime(start_date.year, start_date.month, start_date.day)
-    end_time = datetime.datetime.combine(end_date, datetime.time(23, 59, 59))
-    # Set up data feed
-    for ticker in tickers:
-
-        data = bt.feeds.IBCSVOnlyData(
-            name = ticker,
-            dataname=get_filepath(ticker),
-            fromdate=start_date,
-            todate=end_date,
-            timeframe=bt.TimeFrame.Minutes,
-            compression=1,
-            sessionstart=start_time,  # internally just the "time" part will be used
-            sessionend=end_time,  # internally just the "time" part will be used
-            reverse=False,
-            adjclose=False,
-            plot=not plotreturns,
-        )
-
-        cerebro.adddata(data)
-
-    # Set WriterFile output
-    writerFile = r'E:\gitcode\python_learning\logs\bt-writer\writer.csv'
-    cerebro.addwriter(bt.WriterFile, out=writerFile, csv=True, csv_counter=True, rounding=2, indent=4)
-
-    # Set initial cash amount and commision
-    cerebro.broker.setcash(cash)
-    cerebro.broker.addcommissioninfo(bt.commissions.IBCommInfo(commtype=bt.commissions.IBCommInfo.COMM_STOCK))
-    cerebro.broker.set_slippage_perc(perc=0.005, slip_open=True, slip_match=False)
-
-    # Add obervers
-    if plotreturns:
-        cerebro.addobserver(observers.Value)
-
-
-    # Add analyzers
-    add_analyzers(cerebro, strategy.params.riskfreerate)
-
-    # Run backtest
-    results = cerebro.run()
-
-    # Show analyzers result
-    show_analyzers_reslut(results, cash, cerebro.broker.getvalue())
-
-
-    # Plot results
-    if plot:
-        cerebro.plot()
-
-
-def run_realtime(strategy, tickers=None, start='1900-01-01', end='2100-01-01', 
-                 verbose=False, plot=False, plotreturns=False, universe=None, 
-                 exclude=[], kwargs=None):
-    module_path = f'.algos.{strategy}'
-    module = importlib.import_module(module_path, 'backtest')
-    strategy = getattr(module, strategy)
-    
-    onlinemode = kwargs.get('onlinemode', False)
-    cerebro = cerebor.NewCerebro(
-        stdstats=True,
-        cheat_on_open=kwargs.get('cheat_on_open', False),
-        onlinemode=onlinemode,
-    )
-
-    #port gw.live=4001 gw.paper=4002 tws.live=7496 tws.paper=7497
-    store = bt.stores.IBStoreInsync(clientId=214, port=7497, _debug=True)
-    cerebro.addstore(store)
-    cerebro.broker = store.getbroker()
-
-    # Add a strategy
-    cerebro.addstrategy(strategy, verbose=verbose)
-    
-    if universe:
-        u = universe_util.get(universe)()
-        tickers = [a for a in u.assets if a not in exclude]
-    # Set up data feed
-    for ticker in tickers:
-        data = bt.feeds.IBData(
-            name=ticker,     # Data name
-            dataname=mircofut_real_symbols[ticker], # Symbol name
-            todate = '',
-            durationStr='1 D',
-            barSizeSetting='1 min',
-            timeframe=bt.TimeFrame.Minutes,
-            compression=60,
-            historical=True,
-            what='Midpoint',
-            useRTH=0,
-            formatDate = 1,
-            keepUpToDate = True if onlinemode else False,
-        )
-
-        cerebro.adddata(data)
-
-    # Set WriterFile output
-    writerFile = r'E:\gitcode\python_learning\logs\bt-writer\writer.csv'
-    cerebro.addwriter(bt.WriterFile, out=writerFile, csv=True, csv_counter=True, rounding=2, indent=4)
-
-    #添加观测器指标
-    if plotreturns:
-        cerebro.addobserver(observers.Value)    #自定义观测器
-        cerebro.addobserver(bt.observers.Benchmark)
-        cerebro.addobserver(bt.observers.TimeReturn)
-        cerebro.addobserver(bt.observers.DrawDown)
-        cerebro.addobserver(bt.observers.FundValue)
-        cerebro.addobserver(bt.observers.FundShares)
-        cerebro.broker.set_slippage_perc(perc=0.005, slip_open=True, slip_match=False)
-
-
-    # Add analyzers
-    add_analyzers(cerebro, strategy.params.riskfreerate)
-
-    cash = cerebro.broker.get_cash()
-    # Run backtest
-    results = cerebro.run(preload=False)
-
-    # Show analyzers result
-    show_analyzers_reslut(results, cash, cerebro.broker.getvalue())
-
-    store.run()
-
 def adddata(cerebro=None, **kwargs):
-    data_type = kwargs.get('datatype')
-    assert data_type in ['file', 'historical_limit', 'realtime', 'hitsorical_update']
+    datatype = kwargs.get('datatype')
+    assert datatype in ['file', 'historical_limit', 'realtime', 'hitsorical_update']
 
     start = kwargs.get('start')
     end = kwargs.get('end')
@@ -328,7 +183,7 @@ def adddata(cerebro=None, **kwargs):
         u = universe_util.get(universe)()
         tickers = [a for a in u.assets if a not in exclude]
 
-    if data_type == 'file':
+    if datatype == 'file':
         start_date = dateutil.parser.isoparse(start)
         end_date = dateutil.parser.isoparse(end)
 
@@ -351,9 +206,9 @@ def adddata(cerebro=None, **kwargs):
                 adjclose=False,
                 plot=not plotreturns,
             )
-
             cerebro.adddata(data)
-    elif data_type == 'historical_limit':
+
+    elif datatype == 'historical_limit':
         # Set up data feed
         for ticker in tickers:
             data = bt.feeds.IBData(
@@ -368,9 +223,9 @@ def adddata(cerebro=None, **kwargs):
                 formatDate = 1,
                 keepUpToDate = False,
             )
-
             cerebro.adddata(data)
-    elif data_type == 'hitsorical_update':
+
+    elif datatype == 'hitsorical_update':
         for ticker in tickers:
             data = bt.feeds.IBData(
                 name=ticker,     # Data name
@@ -384,9 +239,9 @@ def adddata(cerebro=None, **kwargs):
                 formatDate = 1,
                 keepUpToDate = True,
             )
-
             cerebro.adddata(data)
-    elif data_type == 'realtime':
+
+    elif datatype == 'realtime':
         for ticker in tickers:
             data = bt.feeds.IBData(
                 name=ticker,     # Data name
@@ -400,19 +255,20 @@ def adddata(cerebro=None, **kwargs):
                 formatDate = 1,
                 keepUpToDate = True,
             )
-
             cerebro.adddata(data)
 
 def run(**kwargs):
-    run_mode = kwargs.pop('runmode', 'backtest')
-    assert run_mode in ['backtest', 'living_trading', 'paper_trading']
-    
+    runmode = kwargs.get('runmode', None)
+    assert runmode in ['backtest', 'living_trading', 'paper_trading']
+    datatype = kwargs.get('datatype', None)
+    assert datatype in ['file', 'historical_limit', 'realtime', 'hitsorical_update']
+
     strategy = kwargs.pop('strategy', 'CrossOver')
     module_path = f'.algos.{strategy}'
     module = importlib.import_module(module_path, 'backtest')
     strategy = getattr(module, strategy)
 
-    broker = kwargs.pop('broker', 'BackBroker' if run_mode == 'backtest' else 'IBBroker')
+    broker = kwargs.pop('broker', 'BackBroker' if runmode == 'backtest' else 'IBBroker')
     try:
         module_path = 'backtrader'
         module = importlib.import_module(module_path)
@@ -423,13 +279,15 @@ def run(**kwargs):
 
     cerebro = cerebor.NewCerebro(
         stdstats=True,
-        cheat_on_open=kwargs.get('cheat_on_open', False)
+        runmode=kwargs.get('runmode'),
+        cheat_on_open=False,
     )
 
-    if run_mode != 'backtest':
-        store = bt.stores.IBStoreInsync(clientId=214, port=4002, _debug=True)
+    if datatype != 'file':
+        #port gw.live=4001 gw.paper=4002 tws.live=7496 tws.paper=7497
+        store = bt.stores.IBStoreInsync(clientId=214, port=4002, runmode=runmode)
         cerebro.addstore(store)
-        cerebro.broker = broker
+        cerebro.broker = store.getbroker()
 
     # Add a strategy
     cerebro.addstrategy(strategy, verbose=kwargs.get('verbose', True))
@@ -441,7 +299,7 @@ def run(**kwargs):
     writerFile = r'E:\gitcode\python_learning\logs\bt-writer\writer.csv'
     cerebro.addwriter(bt.WriterFile, out=writerFile, csv=True, csv_counter=True, rounding=2, indent=4)
 
-    if run_mode == 'backtest':
+    if datatype == 'file':
         cash = kwargs.get('cash', 100000.0)
         # Set initial cash amount and commision
         cerebro.broker.setcash(cash)
@@ -456,14 +314,14 @@ def run(**kwargs):
     add_analyzers(cerebro, **kwargs)
 
     # Run backtest
-    results = cerebro.run(preload=False, run_mode=run_mode)
+    results = cerebro.run(preload=False, runmode=runmode)
 
     # Show analyzers result
     show_analyzers_reslut(results, cash, cerebro.broker.getvalue())
 
     # Plot results
     plot = kwargs.get('plot', False)
-    if run_mode == 'backtest':
+    if runmode == 'backtest':
         if plot:
             cerebro.plot()
     else:
