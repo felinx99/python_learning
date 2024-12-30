@@ -44,12 +44,11 @@ datatype: 回测模式下两种: file,historical_limit,
 
 | Arg          | Flag           | Possible Values             | Description                                                                                 |
 | ------------ | -------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
-| running mode | runmode        | backtest,living_trading,etc | running mode
+| running mode | runmode        | backtest,living_trading,etc | running mode                                                                                |
 | strategy     |                | BuyAndHold, CrossOver, etc. | Choose from the list of algorithms in the ./backtest/algos/. The arg value is the filename. |
 | tickers      | -t, --tickers  | SPY, AAPL, etc.             | A list of tickers to use.                                                                   |
-| universe     | -u, --universe | sp500, faang, etc.          | Find the list of uniuverses in ./backtest/utils/universe.py    
-| data type    | -d, --datatype | file, historical_limit, etc.| Choose for description data source type
-| start        | -s, --start    | 2010, 2010-01-01            | Starting date of the                              |
+| universe     | -u, --universe | sp500, faang, etc.          | Find the list of uniuverses in ./backtest/utils/universe.py                                 |
+| data type    | -d, --datatype | file, historical_limit, etc.| Choose for description data source type                                                     |
 | start        | -s, --start    | 2010, 2010-01-01            | Starting date of the backtest                                                               |
 | end          | -e, --end      | 2022, 2021-12-31            | End date for backtest                                                                       |
 | cash         | --cash         | 100000                      | Starting cash balance                                                                       |
