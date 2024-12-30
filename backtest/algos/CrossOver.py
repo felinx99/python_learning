@@ -29,70 +29,58 @@ class CrossOver(base.Strategy):
             
             split_target = self.target_percent * self.weights[i]
             comminfo = self.broker.getcommissioninfo(d)
-            price = d.close[0]
-            possize = self.getposition(d).size
+            price = d.close[0]       
             
             if d.buysell > 0:
+                self.log(f'signal > 0 {price}')
                 takeProfitPrice = round(price*1.5, 4)
                 stopLossPrice = round(price*0.85,4)
-                if possize:
+                if self.getposition(d):
+                    possize = self.getposition(d).size
                     self.close(data=d,
                                size=possize,
-                               lmtPrice=price,
+                               price=price,
                                orderType='LMT',
-                               tif='DAY',
+                               tif='GTC',
                                tradeid=d.curtradeid)
-                    break
-                
-                d.curtradeid = next(d.tradeid)
-                targetvalue = split_target * self.broker.getcash()                 
-                size = comminfo.getsize(price, targetvalue)
-                #self.buy(data=d,
-                #         size=size,
-                #         lmtPrice=price,
-                #         takeProfitPrice=takeProfitPrice,
-                #         stopLossPrice=stopLossPrice,
-                #         orderType='BKT',
-                #         tif='GTC',
-                #         tradeid=d.curtradeid)
-                self.buy_bracket(data=d,
-                         size=size,
-                         price=price,
-                         limitprice=takeProfitPrice,
-                         stopprice=stopLossPrice,
-                         tradeid=d.curtradeid)
+                else:
+                    d.curtradeid = next(d.tradeid)
+                    targetvalue = split_target * self.broker.getcash()                 
+                    size = comminfo.getsize(price, targetvalue)
+                    self.buy(data=d,
+                             size=size,
+                             price=price,
+                             orderType='BKT',
+                             takeProfitPrice=takeProfitPrice,
+                             stopLossPrice=stopLossPrice,
+                             tif='GTC',
+                             tradeid=d.curtradeid)
   
             if d.buysell < 0:
+                self.log(f'signal < 0 {price}')
                 takeProfitPrice = round(price*0.85,4)
                 stopLossPrice = round(price*1.5,4)
-                if possize:
+                if self.getposition(d):
+                    possize = self.getposition(d).size
                     
                     self.close(data=d,
                                size=possize,
-                               lmtPrice=price,
+                               price=price,
                                orderType='LMT',
-                               tif='DAY',
-                               tradeid=d.curtradeid,
-                               pseudosubmit=True)
-                    break
+                               tif='GTC',
+                               tradeid=d.curtradeid)
+                else:
+                    d.curtradeid = next(d.tradeid)
+                    targetvalue = -split_target * self.broker.getcash()
+                    size = comminfo.getsize(price, targetvalue)
 
-                
-                d.curtradeid = next(d.tradeid)
-                targetvalue = -split_target * self.broker.getcash()
-                size = comminfo.getsize(price, targetvalue)
+                    self.sell(data=d,
+                              size=size,
+                              price=price,
+                              orderType='BKT',
+                              takeProfitPrice=takeProfitPrice,
+                              stopLossPrice=stopLossPrice,
+                              tif='GTC',
+                              tradeid=d.curtradeid)
 
-                #self.sell(data=d,
-                #          size=size,
-                #          lmtPrice=price,
-                #          takeProfitPrice=takeProfitPrice,
-                #          stopLossPrice=stopLossPrice,
-                #          orderType='BKT',
-                #          tif='GTC',
-                #          tradeid=d.curtradeid)
-                self.sell_bracket(data=d,
-                         size=size,
-                         price=price,
-                         limitprice=takeProfitPrice,
-                         stopprice=stopLossPrice,
-                         tradeid=d.curtradeid)
 

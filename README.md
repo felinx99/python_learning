@@ -8,8 +8,6 @@ Implemented with Backtrader in Python.
 
 '''
 ## 调用说明
-AIzaSyAArtu952QWf37FrAp4qygPA8sTmuwQJCU
-
 支持回测和交易两种使用模式。
 
 回测模式：针对有限数据集，进行策略回测，输出回测结果。支持单策略测试，多策略测试和策略调优。

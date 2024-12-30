@@ -1,5 +1,9 @@
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 import itertools
 import backtrader as bt
+from backtrader.order import Order
 
 class Strategy(bt.Strategy):
     """
@@ -31,91 +35,87 @@ class Strategy(bt.Strategy):
         for analyzer in itertools.chain(self.analyzers, self._slave_analyzers):
             analyzer._stop()
  
-    def buy(self, data=None, size=0, **kwargs):
+    def _convert_orderparams(self, orderType=None, price=0, kwargs=None):
+        
+        if orderType == 'LMT':
+            kwargs['exectype'] = Order.Limit
+            kwargs['lmtPrice'] = price
+        elif orderType == 'STP':
+            kwargs['exectype'] = Order.Stop
+            kwargs['auxPrice'] = price
+
+    def buy(self, data=None, size=0, price=0, orderType=None, **kwargs):
         '''
         buy订单提交前需要进行资金检查, 如果资金不足, 则需要取消订单
         '''
-        ordtype = kwargs.get('orderType', None)
-        if ordtype == 'BKT':
-            lmtPrice=kwargs.get('price')
+        if orderType == 'BKT':
             takeProfitPrice=kwargs.pop('takeProfitPrice')
             stopLossPrice=kwargs.pop('stopLossPrice')
 
-            newkwargs = dict(lmtPrice=lmtPrice, 
-                             action='BUY',
-                             orderType='LMT', 
+            newkwargs = dict(action='BUY',
                              transmit=False)
             newkwargs.update(kwargs)
-            parent = self.broker.buy(self,data,size,**newkwargs)
+            self._convert_orderparams(orderType='LMT', price=price, kwargs=newkwargs)
+            parent = self.broker.buy(self,data,size, price=price,orderType='LMT', **newkwargs)
 
-            newkwargs = dict(lmtPrice=takeProfitPrice, 
-                             action='SELL',
-                             orderType='LMT', 
+            newkwargs = dict(action='SELL',
                              parentId=parent.orderId,
                              parent=parent,
                              transmit=False)
             newkwargs.update(kwargs)
-            takeprofit = self.broker.sell(self,data,size,**newkwargs)
+            self._convert_orderparams(orderType='LMT', price=takeProfitPrice, kwargs=newkwargs)
+            takeprofit = self.broker.sell(self,data,size,price=takeProfitPrice, orderType='LMT', **newkwargs)
 
-            newkwargs = dict(auxPrice=stopLossPrice, 
-                             action='SELL',
-                             orderType='STP', 
+            newkwargs = dict(action='SELL',       
                              parentId=parent.orderId,
                              parent=parent,
                              transmit=True)
             newkwargs.update(kwargs)
-            stoploss = self.broker.sell(self,data,size, **kwargs)
+            self._convert_orderparams(orderType='STP', price=stopLossPrice, kwargs=newkwargs)
+            stoploss = self.broker.sell(self,data,size, price=stopLossPrice, orderType='STP', **newkwargs)
 
             return [parent, takeprofit, stoploss]
         else:
-            if ordtype == 'LMT':
-                kwargs['lmtPrice'] = kwargs.get('price') 
-            elif ordtype == 'STP':
-                kwargs['auxPrice'] = kwargs.get('price')
-            return self.broker.buy(self, data, size=size, **kwargs)
+            self._convert_orderparams(orderType, price, kwargs)
+            return self.broker.buy(self, data, size=size, price=price, orderType=orderType,**kwargs)
 
 
-    def sell(self, data=None, size=0, **kwargs):
+    def sell(self, data=None, size=0, price=0, orderType=None, **kwargs):
         '''
         sell订单提交前需要进行资金检查, 如果资金不足, 则需要取消订单
         '''
-        ordtype = kwargs.get('ordertype', None)
-        if ordtype == 'BKT':
-            lmtPrice=kwargs.pop('lmtPrice')
+        if orderType == 'BKT':
             takeProfitPrice=kwargs.pop('takeProfitPrice')
             stopLossPrice=kwargs.pop('stopLossPrice')
 
-            newkwargs = dict(lmtPrice=lmtPrice, 
-                             action='SELL',
-                             orderType='LMT', 
+            newkwargs = dict(action='SELL',
                              transmit=False)
             newkwargs.update(kwargs)
-            parent = self.broker.sell(self,data,size,**newkwargs)
+            self._convert_orderparams(orderType='LMT', price=price, kwargs=newkwargs)
+            parent = self.broker.sell(self,data,size, price=price, orderType='LMT',**newkwargs)
 
-            newkwargs = dict(lmtPrice=takeProfitPrice, 
-                             action='BUY',
-                             orderType='LMT', 
+            newkwargs = dict(action='BUY',   
                              parentId=parent.orderId,
+                             parent=parent,
                              transmit=False)
             newkwargs.update(kwargs)
-            takeprofit = self.broker.buy(self,data,size,**newkwargs)
+            self._convert_orderparams(orderType='LMT', price=takeProfitPrice, kwargs=newkwargs)
+            takeprofit = self.broker.buy(self,data,size, price=takeProfitPrice, orderType='LMT', **newkwargs)
 
-            newkwargs = dict(lmtPrice=stopLossPrice, 
-                             action='BUY',
-                             orderType='STP', 
+            newkwargs = dict(action='BUY',
+                             parentId=parent.orderId,
+                             parent=parent,
                              transmit=True)
             newkwargs.update(kwargs)
-            stoploss = self.broker.buy(self,data,size, **kwargs)
+            self._convert_orderparams(orderType='STP', price=stopLossPrice, kwargs=newkwargs)
+            stoploss = self.broker.buy(self,data,size, price=stopLossPrice,orderType='STP', **kwargs)
 
             return [parent, takeprofit, stoploss]
         else:
-            if ordtype == 'LMT':
-                kwargs['lmtPrice'] = kwargs.get('price') 
-            elif ordtype == 'STP':
-                kwargs['auxPrice'] = kwargs.get('price')
-            return self.broker.sell(self, data, size=size, **kwargs)
+            self._convert_orderparams(orderType, price, kwargs)
+            return self.broker.sell(self, data, size=size, price=price, orderType=orderType, **kwargs)
 
-    def close(self, data=None, size=0, **kwargs):
+    def close(self, data=None, size=0, price=0, orderType=None, **kwargs):
         '''
         close时不需要在submit订单前进行资金检查
         '''
@@ -127,9 +127,9 @@ class Strategy(bt.Strategy):
         size = size if size != 0 else possize
         
         if possize > 0:
-            return self.sell(data=data, size=size, **kwargs)
+            return self.sell(data=data, size=size, price=price, orderType=orderType, **kwargs)
         elif possize < 0:
-            return self.buy(data=data, size=size, **kwargs)
+            return self.buy(data=data, size=size, price=price, orderType=orderType, **kwargs)
 
     def notify_order(self, order):
         BUY_SELL = 'Buy' if order.isbuy() else 'Sell'
@@ -156,8 +156,8 @@ class Strategy(bt.Strategy):
             self.log(f"{order.data._name}: " \
                      f"Order ref: {order.ref} / Type {BUY_SELL} / " \
                      f"Status {order.getstatusname()} / " \
-                     f"Price: {order.executed.price:.2f} / " \
-                     f"Size: {order.executed.size:.2f} / " )                
+                     f"Price: {order.executed.price:.6f} / " \
+                     f"Size: {order.executed.size} / " )                
 
         elif order.status in [order.Canceled, order.Margin, order.Rejected]:
             status_reason = {

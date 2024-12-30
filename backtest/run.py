@@ -23,6 +23,15 @@ mircofut_real_symbols = {
     'USDJPY':"FUT-MJY-USD-CME-20250317-1250000-False",
 }
 
+cash_hist_symbols = {
+    'GBPUSD':"CASH-GBP-USD-IDEALPRO",
+    'AUDUSD':"CASH-AUD-USD-IDEALPRO",
+    'USDCAD':"CASH-USD-CAD-IDEALPRO",
+    'CHFUSD':"CASH-CHF-USD-IDEALPRO",
+    'EURUSD':"CASH-EUR-USD-IDEALPRO",
+    'USDJPY':"CASH-USD-JPY-IDEALPRO",   
+}
+
 def get_filepath(ticker):
     basepath = os.path.join(os.path.dirname(__file__), '../data/cash/')
     #生成文件路径
@@ -169,14 +178,12 @@ def show_analyzers_reslut(results=[], start_value=0, end_value=0):
     
 def adddata(cerebro=None, **kwargs):
     datatype = kwargs.get('datatype')
-    assert datatype in ['file', 'historical_limit', 'realtime', 'hitsorical_update']
-
     start = kwargs.get('start')
     end = kwargs.get('end')
     tickers = kwargs.get('tickers', None)
     universe = kwargs.get('universe', None)
     exclude = kwargs.get('exclude', None)
-    plotreturns = kwargs.get('plotreturns', False)
+    plotreturns = kwargs.get('plotreturns', True)
     
     tickers = tickers if (tickers or universe) else ['SPY']
     if universe:
@@ -190,6 +197,8 @@ def adddata(cerebro=None, **kwargs):
         tickers = clean_tickers(tickers, start_date, end_date)
         start_time = datetime.datetime(start_date.year, start_date.month, start_date.day)
         end_time = datetime.datetime.combine(end_date, datetime.time(23, 59, 59))
+        
+                      
         # Set up data feed
         for ticker in tickers:
 
@@ -208,12 +217,13 @@ def adddata(cerebro=None, **kwargs):
             )
             cerebro.adddata(data)
 
+
     elif datatype == 'historical_limit':
         # Set up data feed
         for ticker in tickers:
             data = bt.feeds.IBData(
                 name=ticker,     # Data name
-                dataname=mircofut_real_symbols[ticker], # Symbol name
+                dataname=cash_hist_symbols[ticker], # Symbol name
                 todate = '',
                 durationStr='1 D',
                 barSizeSetting='1 min',
@@ -268,18 +278,9 @@ def run(**kwargs):
     module = importlib.import_module(module_path, 'backtest')
     strategy = getattr(module, strategy)
 
-    broker = kwargs.pop('broker', 'BackBroker' if runmode == 'backtest' else 'IBBroker')
-    try:
-        module_path = 'backtrader'
-        module = importlib.import_module(module_path)
-        broker = getattr(module.brokers, broker)
-    except (ImportError, AttributeError) as e:
-        print(f"Error importing BackBroker: {e}")
-        return None
-
     cerebro = cerebor.NewCerebro(
         stdstats=True,
-        runmode=kwargs.get('runmode'),
+        runmode=runmode,
         cheat_on_open=False,
     )
 
@@ -287,30 +288,28 @@ def run(**kwargs):
         #port gw.live=4001 gw.paper=4002 tws.live=7496 tws.paper=7497
         store = bt.stores.IBStoreInsync(clientId=214, port=4002, runmode=runmode)
         cerebro.addstore(store)
-        cerebro.broker = store.getbroker()
+        cerebro.broker = store.getbroker() 
+
+    # Set initial cash amount and commision  
+    if runmode == 'backtest':
+        cash = kwargs.get('cash', 100000.0) 
+        cerebro.broker.setcash(cash) 
+    else:
+        cash = cerebro.broker.get_cash()
+
+    comminfo = bt.commissions.IBCommInfo(commission= 0.001)
+    cerebro.broker.addcommissioninfo(comminfo)
+    cerebro.broker.set_slippage_perc(perc=0.0001, slip_open=True, slip_match=False)
 
     # Add a strategy
     strat_kwargs = kwargs.get('kwargs', {})
-    cerebro.addstrategy(strategy, verbose=kwargs.get('verbose', True), **strat_kwargs)
-
+    cerebro.addstrategy(strategy, verbose=kwargs.get('verbose', False), **strat_kwargs)
 
     adddata(cerebro, **kwargs)
-
     # Set WriterFile output
     writerFile = r'E:\gitcode\python_learning\logs\bt-writer\writer.csv'
     cerebro.addwriter(bt.WriterFile, out=writerFile, csv=True, csv_counter=True, rounding=2, indent=4)
 
-    if datatype == 'file':
-        cash = kwargs.get('cash', 100000.0)
-        # Set initial cash amount and commision
-        cerebro.broker.setcash(cash)
-        cerebro.broker.addcommissioninfo(bt.commissions.IBCommInfo(commtype=bt.commissions.IBCommInfo.COMM_STOCK))
-        cerebro.broker.set_slippage_perc(perc=0.005, slip_open=True, slip_match=False)
-    else:
-        cash = cerebro.broker.get_cash()
-        #添加佣金
-        cerebro.broker.setcommission(commission=0.001)
-    
     # Add analyzers
     add_analyzers(cerebro, **kwargs)
 
@@ -341,10 +340,12 @@ if __name__ == '__main__':
     PARSER.add_argument('-e', '--end', nargs=1)
     PARSER.add_argument('--cash', nargs=1, type=int)
     PARSER.add_argument('-v', '--verbose', action='store_true')
-    PARSER.add_argument('-p', '--plot', action='store_false')
+    PARSER.add_argument('-p', '--plot', action='store_true')
     PARSER.add_argument('--plotreturns', action='store_false')
     PARSER.add_argument('-k', '--kwargs', required=False, default='',
-                        metavar='kwargs', help='kwargs in key=value format for strategy')
+                        metavar='kwargs', 
+                        help='kwargs in key=value format for strategy')
+
     ARGS = PARSER.parse_args()
     ARG_ITEMS = vars(ARGS)
 
