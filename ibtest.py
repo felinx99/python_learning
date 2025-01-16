@@ -5,6 +5,8 @@ from ibapi.utils import floatMaxString, intMaxString, decimalMaxString, longMaxS
 from ibapi.common import *
 from ibapi.account_summary_tags import *
 
+import uuid
+import itertools
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -203,6 +205,10 @@ class TradeApp(EWrapper, EClient):
     def error(self, reqId: TickerId, errorTime: int, errorCode: int, errorString: str, advancedOrderRejectJson = ""):
         print("Error. Id:", reqId, errorTime, "Code:", errorCode, "Msg:", errorString, "AdvancedOrderRejectJson:", advancedOrderRejectJson)
 
+    def nextValidId(self, orderId: int):
+        print("NextValidId:", orderId)
+        self.nextOrderId = orderId
+
     
 
 def websocket_con():
@@ -300,15 +306,46 @@ data1 = app.reqRealTimeBars(
 )
 time.sleep(10)
 
-orderid = 213
-order = Order()
-order.orderType = 'LMT'
-order.action = 'SELL'
-order.totalQuantity = 15
-#order.lmtPrice = f"{app.realtimebars[-1].close*1.01:.4f}"
-order.tif = 'GTC'
-#app.reqOpenOrders()
 
-#app.placeOrder(orderid, contract, order)
+app.reqIds(-1) 
+parent_order = Order()
+parent_order.orderId = app.nextOrderId
+parent_order.orderType = 'LMT'
+parent_order.action = 'BUY'
+parent_order.totalQuantity = 15
+parent_order.lmtPrice = 1.2500
+parent_order.tif = 'GTC'
+parent_order.transmit = False
+
+'''
+stoploss_order = Order()
+stoploss_order.orderType = 'TRAIL'
+stoploss_order.orderId = parent_order.orderId+1
+stoploss_order.action = 'SELL'
+stoploss_order.totalQuantity = 15
+stoploss_order.trailStopPrice = 1.2550
+stoploss_order.auxPrice = 0.001
+#stoploss_order.trailingPercent = 23 #23%,百分数;0.23表示0.23%
+stoploss_order.tif = 'GTC'
+stoploss_order.transmit = True
+stoploss_order.parentId = parent_order.orderId
+'''
+
+stoploss_order = Order()
+stoploss_order.orderType = 'TRAIL LIMIT'
+stoploss_order.orderId = parent_order.orderId+1
+stoploss_order.action = 'SELL'
+stoploss_order.totalQuantity = 15
+stoploss_order.trailStopPrice = 1.2550
+stoploss_order.auxPrice = 0.001
+#stoploss_order.trailingPercent = 23 #23%,百分数;0.23表示0.23%
+stoploss_order.lmtPriceOffset=-0.01
+stoploss_order.tif = 'GTC'
+stoploss_order.transmit = True
+stoploss_order.parentId = parent_order.orderId
+
+
+app.placeOrder(parent_order.orderId, contract, parent_order)
+app.placeOrder(stoploss_order.orderId, contract, stoploss_order)
 
 print('hello world')

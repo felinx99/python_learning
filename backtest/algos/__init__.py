@@ -1,1 +1,1 @@
-from . import BaseStrategy, BuyAndHold, CrossOver, MeanReversion, LeveragedEtfPair, WeightedHold, NCAV
+from . import BaseStrategy, BuyAndHold, CrossOver, MeanReversion, LeveragedEtfPair, WeightedHold, NCAV, MACD

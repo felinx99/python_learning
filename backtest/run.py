@@ -190,10 +190,10 @@ def adddata(cerebro=None, **kwargs):
         u = universe_util.get(universe)()
         tickers = [a for a in u.assets if a not in exclude]
 
+    start_date = dateutil.parser.isoparse(start) if start is not None else ''
+    end_date = dateutil.parser.isoparse(end) if end is not None else ''
+    
     if datatype == 'file':
-        start_date = dateutil.parser.isoparse(start)
-        end_date = dateutil.parser.isoparse(end)
-
         tickers = clean_tickers(tickers, start_date, end_date)
         start_time = datetime.datetime(start_date.year, start_date.month, start_date.day)
         end_time = datetime.datetime.combine(end_date, datetime.time(23, 59, 59))
@@ -235,14 +235,14 @@ def adddata(cerebro=None, **kwargs):
             )
             cerebro.adddata(data)
 
-    elif datatype == 'hitsorical_update':
+    elif datatype == 'historical_update':
         for ticker in tickers:
             data = bt.feeds.IBData(
                 name=ticker,     # Data name
                 dataname=mircofut_real_symbols[ticker], # Symbol name
                 todate = '',
                 durationStr='1 D',
-                barSizeSetting='1 min',
+                barSizeSetting='5 mins',
                 historical=True,
                 what='Midpoint',
                 useRTH=0,
@@ -253,25 +253,58 @@ def adddata(cerebro=None, **kwargs):
 
     elif datatype == 'realtime':
         for ticker in tickers:
-            data = bt.feeds.IBData(
-                name=ticker,     # Data name
+                   
+            backfillkwargs = dict(
                 dataname=mircofut_real_symbols[ticker], # Symbol name
                 todate = '',
                 durationStr='1 D',
                 barSizeSetting='1 min',
-                historical=False,
+                timeframe = bt.TimeFrame.Minutes,
+                compression = 1, 
+                historical=True,
                 what='Midpoint',
                 useRTH=0,
                 formatDate = 1,
-                keepUpToDate = True,
+                keepUpToDate = False,
+            )
+            #backfill_for_data = bt.feeds.IBData(**backfillkwargs)
+            
+            data = bt.feeds.IBData(
+                name=ticker,     # Data name
+                dataname=mircofut_real_symbols[ticker], # Symbol name
+                fromdate = start_date,
+                enddate = '',
+                todate = '',
+                timeframe = bt.TimeFrame.Seconds,
+                compression = 5,                 
+                rtbar=True,
+                what='TRADES', 
+                qcheck=0.5,
+                useRTH=0,
+                formatDate = 1,
+                backfill_start = True,          
             )
             cerebro.adddata(data)
 
+            cerebro.replaydata(
+                data,
+                timeframe=bt.TimeFrame.Minutes,
+                compression=1)
+
+            #cerebro.replaydata(
+            #    data,
+            #    timeframe=bt.TimeFrame.Days,
+            #    compression=1)
+
 def run(**kwargs):
     runmode = kwargs.get('runmode', None)
-    assert runmode in ['backtest', 'living_trading', 'paper_trading']
     datatype = kwargs.get('datatype', None)
-    assert datatype in ['file', 'historical_limit', 'realtime', 'hitsorical_update']
+    if runmode == 'backtest':
+        assert datatype in ['file', 'historical_limit']
+    elif runmode == 'trading':
+        assert datatype in ['realtime', 'historical_update']
+    else:
+        raise ValueError(f"无效的 runmode：{runmode}")
 
     strategy = kwargs.pop('strategy', 'CrossOver')
     module_path = f'.algos.{strategy}'

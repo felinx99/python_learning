@@ -392,6 +392,7 @@ class NewCerebro(bt.Cerebro):
                 #等待数据集齐
                 if hasDataAlready:
                     print(f"数据集齐，开始处理数据")
+                    self.broker.ib.set_tradestatus(True)
                     self.runstrategieskenel()
        
             except queue.Empty: # 重置信号标志，准备下次等待
@@ -427,57 +428,3 @@ class NewCerebro(bt.Cerebro):
         self._run_online_start() 
         return None 
     
-
-    def runstrategies(self, iterstrat, predata=False):
-        if self.runmode == 'backtest':
-            return super().runstrategies(iterstrat, predata)
-        else:
-            self.prerunstrategies(iterstrat=iterstrat, predata=predata)
-            self.runstrategieskenel()
-            #self.finishrunstrategies(predata=predata)
-            runstrats = self.runningstrats
-
-            for strat in runstrats:
-                strat._stop()
-            return self.runningstrats
-    
-    def run(self, **kwargs):
-        '''The core method to perform backtesting. Any ``kwargs`` passed to it
-        will affect the value of the standard parameters ``Cerebro`` was
-        instantiated with.
-
-        If ``cerebro`` has not datas the method will immediately bail out.
-
-        It has two different execution modes:
-            Offline Mode: The data length is fixed. For all data, the strategy
-                completes all calculations in a single run and returns the 
-                result.
-                Explanation: In offline mode, the system processes all 
-                            available data at once without waiting for new data
-                            to arrive. This is typically used when the dataset
-                            is complete and there's no need for real-time updates.
-            Online Mode: The data length is infinite. New data is acquired in
-                real time. The strategy initially completes calculations on the
-                existing data and then suspends until new data arrives. When new
-                data is generated, the strategy performs calculations on it. The
-                calculation results are output periodically using a timer function.
-                Explanation: In online mode, the system continuously processes
-                            data as it becomes available. The strategy starts
-                            with the initial dataset and then updates its
-                            calculations whenever new data is received. This
-                            mode is suitable for applications that require
-                            real-time analysis or continuous monitoring.
-        '''
-        
-        
-        runmode = kwargs.get('runmode')          
-        if runmode != 'backtest':
-            self.prerun(**kwargs)
-            self.startrun()
-            self.run_online() 
-            
-            rets = self.runstrats[0] if not self._dooptimize else self.runstrats
-        else:
-            rets = super().run(**kwargs)
-        
-        return rets

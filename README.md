@@ -31,7 +31,7 @@ Implemented with Backtrader in Python.
 
 ## 参数说明
 
-runmode: 回测模式：'backtest', 交易模式：'living_trading', 'paper_trading'
+runmode: 回测模式：'backtest', 交易模式：'trading'
 
 datatype: 回测模式下两种: file,historical_limit,
 
@@ -42,7 +42,7 @@ datatype: 回测模式下两种: file,historical_limit,
 
 | Arg          | Flag           | Possible Values             | Description                                                                                 |
 | ------------ | -------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
-| running mode | runmode        | backtest,living_trading,etc | running mode                                                                                |
+| running mode | runmode        | backtest,trading            | running mode                                                                                |
 | strategy     |                | BuyAndHold, CrossOver, etc. | Choose from the list of algorithms in the ./backtest/algos/. The arg value is the filename. |
 | tickers      | -t, --tickers  | SPY, AAPL, etc.             | A list of tickers to use.                                                                   |
 | universe     | -u, --universe | sp500, faang, etc.          | Find the list of uniuverses in ./backtest/utils/universe.py                                 |

@@ -13,7 +13,7 @@ class Strategy(bt.Strategy):
     params = {
         'riskfreerate': 0.046,
         'cheat_on_open': False,
-        'verbose': True
+        'verbose': True,
     }
 
     def __init__(self, kwargs=None):
@@ -34,20 +34,39 @@ class Strategy(bt.Strategy):
 
         for analyzer in itertools.chain(self.analyzers, self._slave_analyzers):
             analyzer._stop()
- 
+
     def _convert_orderparams(self, orderType=None, price=0, kwargs=None):
-        
-        if orderType == 'LMT':
+        '''
+        完成两两个功能：
+        1.将IB Order 的ordertype转换为backtrader的exectype
+        2.将backtrader的price转换为IB order的price类别 
+        '''
+
+        if orderType in['LMT', 'LIT']:
             kwargs['exectype'] = Order.Limit
             kwargs['lmtPrice'] = price
+        elif orderType == 'STP LMT':
+            kwargs['exectype'] = Order.StopLimit
+            kwargs['lmtPrice'] = price
+            kwargs['pricelimit'] = kwargs.get('auxPrice')
         elif orderType == 'STP':
             kwargs['exectype'] = Order.Stop
             kwargs['auxPrice'] = price
+        elif orderType == 'MKT':
+            kwargs['exectype'] = Order.Market
+        elif orderType == 'TRAIL':
+            kwargs['exectype'] = Order.StopTrail
+            kwargs['trailStopPrice'] = price
+        elif orderType == 'TRAIL LIMIT':
+            kwargs['exectype'] = Order.StopTrailLimit
+            kwargs['trailStopPrice'] = price
+            kwargs['pricelimit'] = price - kwargs.get('lmtPriceOffset')
 
     def buy(self, data=None, size=0, price=0, orderType=None, **kwargs):
         '''
         buy订单提交前需要进行资金检查, 如果资金不足, 则需要取消订单
         '''
+        assert orderType in ['MKT','LMT','LIT','STP','STP LMT','TRAIL','TRAIL LIMIT', 'BKT']
         if orderType == 'BKT':
             takeProfitPrice=kwargs.pop('takeProfitPrice')
             stopLossPrice=kwargs.pop('stopLossPrice')
@@ -84,6 +103,7 @@ class Strategy(bt.Strategy):
         '''
         sell订单提交前需要进行资金检查, 如果资金不足, 则需要取消订单
         '''
+        assert orderType in ['MKT','LMT','LIT','STP','STP LMT','TRAIL','TRAIL LIMIT', 'BKT']
         if orderType == 'BKT':
             takeProfitPrice=kwargs.pop('takeProfitPrice')
             stopLossPrice=kwargs.pop('stopLossPrice')
@@ -129,7 +149,7 @@ class Strategy(bt.Strategy):
         if possize > 0:
             return self.sell(data=data, size=size, price=price, orderType=orderType, **kwargs)
         elif possize < 0:
-            return self.buy(data=data, size=size, price=price, orderType=orderType, **kwargs)
+            return self.buy(data=data, size=abs(size), price=price, orderType=orderType, **kwargs)
 
     def notify_order(self, order):
         BUY_SELL = 'Buy' if order.isbuy() else 'Sell'

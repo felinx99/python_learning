@@ -4,7 +4,7 @@ import datetime
 from . import BaseStrategy as base
 
 
-class CrossOver(base.Strategy):
+class MACD(base.Strategy):
     params = {
         # Standard MACD Parameters
         'macd1': 12,
@@ -44,29 +44,29 @@ class CrossOver(base.Strategy):
             d.smadir = d.sma - d.sma(-self.p.dirperiod)
      
     def next(self):
-        if self.order:
-            return  # pending order execution
-        
+
         for i, d in enumerate(self.datas):
+            if d.order or not d.islive():
+                # Skip if order is pending
+                return
             split_target = self.target_percent * self.weights[i]
             comminfo = self.broker.getcommissioninfo(d)
             price = d.close[0]
-            possize = self.getposition(d).position
-
+            possize = self.getposition(d).size if self.getposition(d) else 0
+            d.curtradeid = next(d.tradeid)
             if possize == 0:  # not in the market
                 if d.mcross[0] > 0.0 and d.smadir < 0.0:
-                    d.curtradeid = next(d.tradeid)
                     targetvalue = split_target * self.broker.getcash()                 
                     size = comminfo.getsize(price, targetvalue)
                     #self.log(f'Buy-{d._name} size:{size}')
-                    self.buy(data=d, 
-                                    size=size, 
-                                    price=price, 
-                                    #takeProfitPrice=takeProfitPrice, 
-                                    #stopLossPrice=stopLossPrice, 
-                                    orderType='LMT', 
-                                    tif='GTC',
-                                    tradeid=d.curtradeid)
+                    self.buy(data=d,
+                             size=size,
+                             price=price,
+                             #takeProfitPrice=0,
+                             #stopLossPrice=stopLossPrice,
+                             orderType='LMT',
+                             tif='GTC',
+                             tradeid=d.curtradeid)
                     pdist = d.atr[0] * self.p.atrdist
                     d.pstop = d.close[0] - pdist
 
@@ -76,12 +76,11 @@ class CrossOver(base.Strategy):
 
                 if pclose < pstop: # stop met - get out
                     #self.log(f'Close-{d._name} size:{abs(possize)}')
-                    self.close(data=d, 
-                                         size=abs(possize),
-                                         price=price,
-                                         orderType='LMT', 
-                                         tif='DAY',
-                                         tradeid=d.curtradeid)  
+                    self.close(data=d,
+                               size=abs(possize),
+                               orderType='MKT',
+                               tif='GTC',
+                               tradeid=d.curtradeid)  
                 else:
                     pdist = d.atr[0] * self.p.atrdist
                     # Update only if greater than

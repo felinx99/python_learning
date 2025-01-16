@@ -30,17 +30,16 @@ class CrossOver(base.Strategy):
             split_target = self.target_percent * self.weights[i]
             comminfo = self.broker.getcommissioninfo(d)
             price = d.close[0]       
-            
+            possize = self.getposition(d).size if self.getposition(d) else 0
             if d.buysell > 0:
                 self.log(f'signal > 0 {price}')
                 takeProfitPrice = round(price*1.5, 4)
                 stopLossPrice = round(price*0.85,4)
-                if self.getposition(d):
-                    possize = self.getposition(d).size
+                if possize:                    
                     self.close(data=d,
                                size=possize,
                                price=price,
-                               orderType='LMT',
+                               orderType='MKT',
                                tif='GTC',
                                tradeid=d.curtradeid)
                 else:
@@ -50,9 +49,8 @@ class CrossOver(base.Strategy):
                     self.buy(data=d,
                              size=size,
                              price=price,
-                             orderType='BKT',
-                             takeProfitPrice=takeProfitPrice,
-                             stopLossPrice=stopLossPrice,
+                             orderType='LIT',
+                             auxPrice=stopLossPrice,
                              tif='GTC',
                              tradeid=d.curtradeid)
   
@@ -60,26 +58,24 @@ class CrossOver(base.Strategy):
                 self.log(f'signal < 0 {price}')
                 takeProfitPrice = round(price*0.85,4)
                 stopLossPrice = round(price*1.5,4)
-                if self.getposition(d):
-                    possize = self.getposition(d).size
-                    
+                if possize:                   
                     self.close(data=d,
                                size=possize,
                                price=price,
-                               orderType='LMT',
+                               orderType='MKT',
                                tif='GTC',
                                tradeid=d.curtradeid)
                 else:
                     d.curtradeid = next(d.tradeid)
-                    targetvalue = -split_target * self.broker.getcash()
+                    targetvalue = split_target * self.broker.getcash()
                     size = comminfo.getsize(price, targetvalue)
-
                     self.sell(data=d,
                               size=size,
                               price=price,
-                              orderType='BKT',
-                              takeProfitPrice=takeProfitPrice,
-                              stopLossPrice=stopLossPrice,
+                              orderType='TRAIL LIMIT',
+                              lmtPriceOffset=-0.01,
+                              #trailingPercent=23,
+                              auxPrice=0.001,
                               tif='GTC',
                               tradeid=d.curtradeid)
 
