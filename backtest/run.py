@@ -281,20 +281,18 @@ def adddata(cerebro=None, **kwargs):
                 what='TRADES', 
                 qcheck=0.5,
                 useRTH=0,
-                formatDate = 1,
-                backfill_start = True,          
+                formatDate = 2,
+                backfill_start = False,   
+                keepUpToDate = False,       
             )
             cerebro.adddata(data)
 
             cerebro.replaydata(
                 data,
+                name=ticker+'_1M',
                 timeframe=bt.TimeFrame.Minutes,
                 compression=1)
 
-            #cerebro.replaydata(
-            #    data,
-            #    timeframe=bt.TimeFrame.Days,
-            #    compression=1)
 
 def run(**kwargs):
     runmode = kwargs.get('runmode', None)
@@ -340,7 +338,7 @@ def run(**kwargs):
 
     adddata(cerebro, **kwargs)
     # Set WriterFile output
-    writerFile = r'E:\gitcode\python_learning\logs\bt-writer\writer.csv'
+    writerFile = r'E:\gitcode\mystrategy\logs\bt-writer\writer.csv'
     cerebro.addwriter(bt.WriterFile, out=writerFile, csv=True, csv_counter=True, rounding=2, indent=4)
 
     # Add analyzers
