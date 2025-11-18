@@ -462,7 +462,7 @@ class SmaCross(bt.SignalStrategy):
             dtstr = bt.num2date(d.lines.datetime[0], tz=d._tz).strftime('%Y-%m-%d')
             if idx == len(self.datas): #len(self.datas):
                 print(f'deal process -- {idx}/{len(self.datas)} -- {d._name} -- {dtstr}')
-            if d.vratio > 4.5 and d.lienes.close[0] > d.lines.open[0] and 'st' not in d._name.lower():
+            if d.vratio > 4.5 and d.lines.close[0] > d.lines.open[0] and 'st' not in d._name.lower():
                 vratio_list.append(d._name)
             if d.sma5[0] > d.sma10[0] and d.sma10[0] > d.sma20[0] and d.sma20[0] > d.sma30[0] and d.sma30[0] > d.sma60[0]:
                 spot_list.append(d._name)
