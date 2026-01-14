@@ -21,6 +21,8 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 import os
+from pathlib import Path
+import re
 import shutil
 import argparse
 from datetime import date,datetime, timedelta
@@ -399,8 +401,39 @@ def judge_boxbreakout(self, breakt=(), dtstr='', d=None, mid=0):
             set_box(box=d.dynamicbox, hl_tuple=(newboxh, newboxl), date=dtstr, mode=3)
         '''
 
-        
-     
+def delete_oldfiles(directory_path):
+    # 1. 设定目标目录
+    folder = Path(directory_path)
+    if not folder.exists():
+        raise FileNotFoundError(f"未找到目标目录或路径非法: {folder}")
+    
+    # 2. 设定比较基准日期只保留最近2个月结果
+    target_date = datetime.now() - timedelta(days=40)
+
+    date_pattern = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+    print(f"清理基准线: {target_date.strftime('%Y-%m-%d')}")
+    print("-" * 40)
+  
+    # 3. 遍历目录下所有符合 str_*.txt 模式的文件
+    for file_path in folder.glob("*.txt"):
+        match = date_pattern.search(file_path.name)
+
+        if match:
+            try:
+                # 4. 提取日期字符串部分
+                date_str = match.group(1) # 得到 "2024_07_08"
+                
+                # 5. 转换为 datetime 对象
+                file_date = datetime.strptime(date_str, "%Y-%m-%d")
+                
+                # 6. 比较并删除
+                if file_date < target_date:
+                    file_path.unlink() # 执行删除
+                    
+            except (ValueError, IndexError):
+                continue
+    
  
 class SmaCross(bt.SignalStrategy):
     params = dict(sma5=5, sma10=10, sma20=20, sma30=30, sma60=60)
@@ -512,6 +545,11 @@ class SmaCross(bt.SignalStrategy):
         
         print('-------------     finished      --------------')
         print(f'total process: {len(self.datas)} datas')
+
+        delete_oldfiles(RESULT_PATH)
+        print('old files deleted')
+
+
 
 def runstrat(**kwargs):  
     # Create a cerebro entity
