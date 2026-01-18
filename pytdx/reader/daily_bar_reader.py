@@ -2,6 +2,7 @@
 from __future__ import unicode_literals, division
 
 import pandas as pd
+import numpy as np
 import os
 
 #import struct
@@ -58,16 +59,40 @@ class TdxDailyBarReader(BaseReader):
             
         security_type = self.get_security_type(fname)
         if security_type not in self.SECURITY_TYPE:
-            print("Unknown security type !\n")
+            print(f"Unknown security type:{security_type} file:{fname}!\n")
             raise NotImplementedError
 
         coefficient = self.SECURITY_COEFFICIENT[security_type]
-        data = [self._df_convert(row, coefficient) for row in self.parse_data_by_file(fname)]
+        if not os.path.isfile(fname):
+            raise TdxFileNotFoundException('no tdx kline data, pleaes check path %s', fname)
 
-        df = pd.DataFrame(data=data, columns=('date', 'open', 'high', 'low', 'close', 'amount', 'volume'))
-        #df.index = pd.to_datetime(df.date)
-        #return df[['open', 'high', 'low', 'close', 'amount', 'volume']]
-        return df[['date', 'open', 'high', 'low', 'close', 'amount', 'volume']]
+        with open(fname, 'rb') as f:
+            #文件结构 IIIIIfII
+            dt = np.dtype([
+                ('date', '<I'),
+                ('open', '<I'),
+                ('high', '<I'),
+                ('low', '<I'),
+                ('close', '<I'),
+                ('amount', '<f4'),
+                ('volume', '<I'),
+                ('unknown', '<I')
+            ])
+            content = np.fromfile(f, dtype=dt)
+ 
+            df = pd.DataFrame({
+                'date':pd.to_datetime(content['date'].astype(str), format='%Y%m%d'),
+                'open':content['open'] * coefficient[0],
+                'high':content['high'] * coefficient[0],
+                'low':content['low'] * coefficient[0],
+                'close':content['close'] * coefficient[0],
+                'amount':content['amount'],
+                'volume':content['volume'] * coefficient[1],
+            })
+           
+            return df
+        return []
+
 
     def get_df_by_code(self, code, exchange):
 
@@ -80,10 +105,10 @@ class TdxDailyBarReader(BaseReader):
 
         new_row = (
             datestr,
-            f"{row[1] * coefficient[0]:.2f}", # * 0.01 * 1000 , zipline need 1000 times to original price
-            f"{row[2] * coefficient[0]:.2f}",
-            f"{row[3] * coefficient[0]:.2f}",
-            f"{row[4] * coefficient[0]:.2f}",
+            row[1] * coefficient[0], # * 0.01 * 1000 , zipline need 1000 times to original price
+            row[2] * coefficient[0],
+            row[3] * coefficient[0],
+            row[4] * coefficient[0],
             row[5],
             row[6] * coefficient[1]
         )

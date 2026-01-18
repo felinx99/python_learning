@@ -2,11 +2,11 @@
 from __future__ import unicode_literals, division
 
 import pandas as pd
+import numpy as np
 import os
 
 from pytdx.reader.base_reader import TdxFileNotFoundException, TdxNotAssignVipdocPathException
 from pytdx.reader.base_reader import BaseReader
-from collections import OrderedDict
 
 """
 网传秘籍...
@@ -28,38 +28,46 @@ class TdxLCMinBarReader(BaseReader):
         if not os.path.isfile(fname):
             raise TdxFileNotFoundException('no tdx kline data, pleaes check path %s', fname)
         with open(fname, 'rb') as f:
-            content = f.read()
-            raw_li = self.unpack_records("<HHfffffII", content)
-            data = []
-            for row in raw_li:
-                year, month, day = self._parse_date(row[0])
-                hour, minute = self._parse_time(row[1])
+            #文件结构 HHfffffII
+            dt = np.dtype([
+                ('date', '<H'),
+                ('time', '<H'),
+                ('open', '<f4'),
+                ('high', '<f4'),
+                ('low', '<f4'),
+                ('close', '<f4'),
+                ('amount', '<f4'),
+                ('volume', '<I'),
+                ('unknown', '<I')
+            ])
+            content = np.fromfile(f, dtype=dt)
+            year, month, day = self._parse_date(content['date'])
+            hour, minute = self._parse_time(content['time'])
 
-                data.append(OrderedDict([
-                    ("date", "%04d-%02d-%02d %02d:%02d" % (year, month, day, hour, minute)),
-                    ("year", year),
-                    ('month', month),
-                    ('day', day),
-                    ('hour', hour),
-                    ('minute', minute),
-                    ('open', f"{row[2]:.2f}"),
-                    ('high', f"{row[3]:.2f}"),
-                    ('low', f"{row[4]:.2f}"),
-                    ('close', f"{row[5]:.2f}"),
-                    ('amount', row[6]),
-                    ('volume', row[7]),
-                    #('unknown', row[8])
-                ]))
-            return data
+            df = pd.DataFrame({
+                'year':year,
+                'month':month,
+                'day':day,
+                'hour':hour,
+                'minute':minute,
+                'open':content['open'],
+                'high':content['high'],
+                'low':content['low'],
+                'close':content['close'],
+                'amount':content['amount'],
+                'volume':content['volume'],
+            })
+            df['date'] = pd.to_datetime(df[['year', 'month', 'day', 'hour', 'minute']])
+            return df
         return []
 
     def get_df(self, code_or_file, exchange=None):
         #if exchange == None:
             # 只传入了一个参数
-        data = self.parse_data_by_file(code_or_file)
+        df = self.parse_data_by_file(code_or_file)
         #else:
         #    data = [self._df_convert(row) for row in self.get_kline_by_code(code_or_file, exchange)]
-        df = pd.DataFrame(data=data)
+        #df = pd.DataFrame(data=data)
         #df.index = pd.to_datetime(df.date)
         #return df[['open', 'high', 'low', 'close', 'amount', 'volume']]
         return df[['date', 'open', 'high', 'low', 'close', 'amount', 'volume']]

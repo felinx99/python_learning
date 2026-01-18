@@ -1,116 +1,100 @@
-from pathlib import Path
+
 import argparse
-from datetime import date,datetime, timedelta
-import time
+import itertools
+import psutil
 import pandas as pd
+import time
 import tushare as ts
 
-from pytdx.reader import TdxDailyBarReader, TdxLCMinBarReader, TdxFileNotFoundException
+from enum import IntEnum
+from datetime import date, datetime
+from multiprocessing import Pool
+from pathlib import Path
 
-DATA_SRCPATH = 'c:\\new_tdx\\vipdoc'
-DATA_DESTDAYPATH = 'E:\\datas\\tdx\\day_2018_2025'
-DATA_DEST5MPATH = 'E:\\datas\\tdx\\5m_2025'
-DATA_DEST1MPATH = 'E:\\datas\\tdx\\1m_2025'
+from pytdx.reader import TdxDailyBarReader, TdxLCMinBarReader, TdxFileNotFoundException
+from api.timeprofile import TimeProfile
+
+
+DATA_SRCPATH = 'D:\\new_tdx\\vipdoc'
 PERIOD = ['lday', 'fzline', 'minline'] #日线，5分钟，1分钟
 EXCHANGE = ['sh', 'sz', 'bj']
 
+class DATAFRAME(IntEnum):
+    DAY = 0
+    MINUTE5 = 1
+    MINUTE1 = 2
 
-def read_tdx_files(period_type=0):
-    if period_type == 0:
-        reader = TdxDailyBarReader()
-        for exchange_dir in EXCHANGE:
-            directory = Path(DATA_SRCPATH)/exchange_dir/'lday'
-            csv_files = list(directory.glob('*.day'))
+src_dir = {
+    DATAFRAME.DAY: 'lday',
+    DATAFRAME.MINUTE5: 'fzline',
+    DATAFRAME.MINUTE1: 'minline',
+}
 
-            total_items = len(csv_files)
-            for idx,file_path in enumerate(csv_files):
-                idx1 = idx + 1
-                #rename = f"{file_path.stem[2:]}.{file_path.stem[:2].upper()}"
-                fname = f"{file_path.stem[2:]}.{file_path.stem[:2].upper()}" +f".csv"
-                dst_fpath= Path(DATA_DESTDAYPATH)/fname
-                try:
-                    df = reader.get_df(f"{file_path}")
-                except Exception as e:
-                    continue
-                # 转换处理
-                df = df.drop('amount', axis=1)
-                df['date'] = df['date'].str.replace('-', '').astype(int)  
-                if not dst_fpath.exists():
-                    df.to_csv(dst_fpath, sep=',', encoding='utf-8-sig', index=False) 
-                else:
-                    df_dst = pd.read_csv(dst_fpath)
-                    lastdate = df_dst.iloc[-1, 0]
-                    new_data_to_add = df[df['date'] > lastdate]
-                    if not new_data_to_add.empty:
-                        df_dst = pd.concat([df_dst, new_data_to_add], ignore_index=True)
-                        df_dst.to_csv(dst_fpath, sep=',', encoding='utf-8-sig', index=False) 
-                        print(f"Add {len(new_data_to_add)} datas {dst_fpath}, Progress:{idx1}/{total_items}。")
+file_extension = {
+    DATAFRAME.DAY: '*.day',
+    DATAFRAME.MINUTE5: '*.lc5',
+    DATAFRAME.MINUTE1: '*.lc1',
+}
 
-                #yield rename
-        print('day finished')
-    elif period_type == 1:
-        reader = TdxLCMinBarReader()
-        for exchange_dir in EXCHANGE:
-            directory = Path(DATA_SRCPATH)/exchange_dir/'fzline'
-            csv_files = list(directory.glob('*.lc5'))
+dst_dir = {
+    DATAFRAME.DAY: 'E:\\datas\\tdx\\day_2018_2025',
+    DATAFRAME.MINUTE5: 'E:\\datas\\tdx\\5m_2025',
+    DATAFRAME.MINUTE1: 'E:\\datas\\tdx\\1m_2025',
+}
 
-            total_items = len(csv_files)
-            for idx,file_path in enumerate(csv_files):
-                idx1 = idx + 1
-                fname = f"{file_path.stem[2:]}.{file_path.stem[:2].upper()}" +f".csv"
-                dst_fpath= Path(DATA_DEST5MPATH)/fname
-                try:
-                    df = reader.get_df(file_path)
-                except Exception as e:
-                    continue
-                df = df.drop('amount', axis=1)
-                if not dst_fpath.exists():
-                    df.to_csv(f'{dst_fpath}', sep=',', encoding='utf-8-sig', index=False) 
-                else:
-                    df_dst = pd.read_csv(dst_fpath)
-                    lastdate = datetime.strptime(str(df_dst.iloc[-1, 0]), '%Y-%m-%d %H:%M')
-                    src_datetime_series = pd.to_datetime(df['date'], format='%Y-%m-%d %H:%M')
+data_frame = [DATAFRAME.DAY, DATAFRAME.MINUTE5, DATAFRAME.MINUTE1]
 
-                    new_data_to_add = df[src_datetime_series > lastdate]
-                    if not new_data_to_add.empty:
-                        df_dst = pd.concat([df_dst, new_data_to_add], ignore_index=True)
-                        df_dst.to_csv(dst_fpath, sep=',', encoding='utf-8-sig', index=False)
-                        print(f"Add {len(new_data_to_add)} datas {dst_fpath}, Progress:{idx1}/{total_items}。")
-        print('5min finished')   
-    elif period_type == 2:
-        reader = TdxLCMinBarReader()
-        for exchange_dir in EXCHANGE:
-            directory = Path(DATA_SRCPATH)/exchange_dir/'minline'
-            csv_files = list(directory.glob('*.lc1'))
-        
-            total_items = len(csv_files)
-            for idx,file_path in enumerate(csv_files):
-                idx1 = idx + 1
-                fname = f"{file_path.stem[2:]}.{file_path.stem[:2].upper()}" +f".csv"
-                dst_fpath= Path(DATA_DEST1MPATH)/fname
-                try:
-                    df = reader.get_df(f"{file_path}")                           
-                except Exception as e:
-                    continue
-                df = df.drop('amount', axis=1)  
-                if not dst_fpath.exists():
-                    df.to_csv(dst_fpath, sep=',', encoding='utf-8-sig', index=False) 
-                else:
-                    df_dst = pd.read_csv(dst_fpath)
-                    lastdate = datetime.strptime(str(df_dst.iloc[-1, 0]), '%Y-%m-%d %H:%M')
-                    src_datetime_series = pd.to_datetime(df['date'], format='%Y-%m-%d %H:%M')
+date_fmt = {
+    DATAFRAME.DAY: '%Y-%m-%d',
+    DATAFRAME.MINUTE5: '%Y-%m-%d %H:%M',
+    DATAFRAME.MINUTE1: '%Y-%m-%d %H:%M',
+}
 
-                    new_data_to_add = df[src_datetime_series > lastdate]
-                    if not new_data_to_add.empty:
-                        df_dst = pd.concat([df_dst, new_data_to_add], ignore_index=True)
-                        df_dst.to_csv(dst_fpath, sep=',', encoding='utf-8-sig', index=False)
-                        print(f"Add {len(new_data_to_add)} datas {dst_fpath}, Progress:{idx1}/{total_items}。")
-        print('1min finished') 
+def read_tdx_files(srcfile:Path, dateframe:DATAFRAME):
+    tdxread = TdxDailyBarReader() if dateframe == DATAFRAME.DAY else TdxLCMinBarReader()
+
+    try:
+        df_src = tdxread.get_df(f"{srcfile}")
+    except Exception as e:
+        return False
+
+    fname = f"{srcfile.stem[2:]}.{srcfile.stem[:2].upper()}.csv"
+    dstfile = Path(dst_dir[dateframe]) / fname
+
+    # 转换处理
+    df_src = df_src.drop('amount', axis=1)
+    
+    if not dstfile.exists():
+        df_src.to_csv(dstfile, sep=',', encoding='utf-8-sig', index=False, date_format=date_fmt[date], float_format='%.2f') 
+    else:
+        df_dst = pd.read_csv(dstfile)
+        try:
+            df_dst['date'] = pd.to_datetime(df_dst['date'], format=date_fmt[dateframe])
+        except Exception as e:
+            print(f"file read error:{dstfile}, {e}")
+
+        new_data_to_add = df_src[df_src['date'] > df_dst.iloc[-1, 0]]
+
+        if not new_data_to_add.empty:
+            df_dst = pd.concat([df_dst, new_data_to_add], ignore_index=True)
+            df_dst.to_csv(dstfile, sep=',', encoding='utf-8-sig', index=False, date_format=date_fmt[dateframe], float_format='%.2f')
+    return True
 
 def init_tdx():
-    read_tdx_files(0)
-    read_tdx_files(1)
-    read_tdx_files(2)
+    task_filelist = []
+
+    for exchange, dateframe in itertools.product(EXCHANGE, data_frame):
+        directory = Path(DATA_SRCPATH)/exchange/src_dir[dateframe]  
+        new_filelist = [(p, dateframe) for p in directory.glob(file_extension[dateframe])]
+        task_filelist.extend(new_filelist)
+
+    #获取物理核心数，多进程处理
+    physical_cores = psutil.cpu_count(logical=False)
+    if __name__ == '__main__':
+        with Pool(physical_cores) as p:
+            #starmap会自动将task_filelist解包传给函数
+            results = p.starmap(read_tdx_files, task_filelist)
+            print(f"processed {len(results)}/{len(task_filelist)} files, failed {len(task_filelist)-sum(results)}.")
 
 
 if __name__ == '__main__':
@@ -154,8 +138,8 @@ if __name__ == '__main__':
     df.to_csv(TICKERLIST_PATH_DEST, sep=',', encoding='utf-8-sig', index=False)
     '''
     
-
-    init_tdx()
+    with TimeProfile():
+        init_tdx()
     #update_tdx()
 
 
