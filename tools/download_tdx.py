@@ -68,11 +68,8 @@ def read_tdx_files(srcfile:Path, dateframe:DATAFRAME):
         df_src.to_csv(dstfile, sep=',', encoding='utf-8-sig', index=False, date_format=date_fmt[date], float_format='%.2f') 
     else:
         df_dst = pd.read_csv(dstfile)
-        try:
-            df_dst['date'] = pd.to_datetime(df_dst['date'], format=date_fmt[dateframe])
-        except Exception as e:
-            print(f"file read error:{dstfile}, {e}")
-
+        df_dst['date'] = pd.to_datetime(df_dst['date'], format=date_fmt[dateframe])
+        
         new_data_to_add = df_src[df_src['date'] > df_dst.iloc[-1, 0]]
 
         if not new_data_to_add.empty:
@@ -95,6 +92,7 @@ def init_tdx():
             #starmap会自动将task_filelist解包传给函数
             results = p.starmap(read_tdx_files, task_filelist)
             print(f"processed {len(results)}/{len(task_filelist)} files, failed {len(task_filelist)-sum(results)}.")
+
 
 
 if __name__ == '__main__':
