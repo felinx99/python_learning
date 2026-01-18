@@ -48,8 +48,9 @@ def create_list(fpath=None):
 
     if os.path.exists(fpath):
         df = tspro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
-        df = df[['ts_code', 'symbol', 'name', 'area', 'industry', 'list_date']]                    
-        df.to_csv(fpath, sep=',', encoding='utf-8-sig', index=False)
+        df = df[['ts_code', 'symbol', 'name', 'area', 'industry', 'list_date']] 
+        dst_file = os.path.join(fpath, 'stocklist.csv')                   
+        df.to_csv(dst_file, sep=',', encoding='utf-8-sig', index=False)
     else:
         print(f'Path {fpath} not exists, please create it first.')
 
@@ -164,7 +165,7 @@ if __name__ == '__main__':
     TICKER_CSV_PATH = os.path.join(filepath, 'stocklist.csv')
     
     if ARG_ITEMS['list'] == True:
-        create_list(fpath=TICKER_CSV_PATH)
+        create_list(fpath=filepath)
     else:
         if os.path.exists(TICKER_CSV_PATH):
             # 多列转换为tuple列表
