@@ -57,7 +57,7 @@ class TdxLCMinBarReader(BaseReader):
                 'amount':content['amount'],
                 'volume':content['volume'],
             })
-            df['date'] = pd.to_datetime(df[['year', 'month', 'day', 'hour', 'minute']])
+            df['date'] = pd.to_datetime(df[['year', 'month', 'day', 'hour', 'minute']]).values.astype('datetime64[s]')
             return df
         return []
 

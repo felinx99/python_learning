@@ -131,7 +131,7 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
     #combo_file['1-combo'] = newset
     combo_file = newset
 
-    if len(self.spot_filelist) >= 9:   #1连             
+    if len(self.spot_filelist) >= 7:   #1连             
         with open(os.path.join(RESULT_PATH, self.spot_filelist[-2]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         #deal with combo
@@ -157,6 +157,7 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
+        """
         with open(os.path.join(RESULT_PATH, self.spot_filelist[-8]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
@@ -164,7 +165,8 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
         with open(os.path.join(RESULT_PATH, self.spot_filelist[-9]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = combo_file - oldset
-
+        """
+        
         # save combo file
         if combo_file:
             self.combo_filepath = os.path.join(RESULT_PATH, f'combo_{dtstr}.txt')
@@ -497,7 +499,7 @@ class SmaCross(bt.SignalStrategy):
                 print(f'deal process -- {idx}/{len(self.datas)} -- {d._name} -- {dtstr}')
             if d.vratio > 4.5 and d.lines.close[0] > d.lines.open[0] and 'st' not in d._name.lower():
                 vratio_list.append(d._name)
-            if d.sma5[0] > d.sma10[0] and d.sma10[0] > d.sma20[0] and d.sma20[0] > d.sma30[0] and d.sma30[0] > d.sma60[0]:
+            if d.sma5[0] > d.sma10[0] and d.sma10[0] > d.sma20[0] and d.sma20[0] > d.sma30[0]:
                 spot_list.append(d._name)
             judge_boxbreakout(self, breakt=(boxbreakup, boxbreakdown), dtstr=dtstr, d=d, mid=d.sma60[0])
 

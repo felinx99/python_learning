@@ -81,7 +81,7 @@ class TdxDailyBarReader(BaseReader):
             content = np.fromfile(f, dtype=dt)
  
             df = pd.DataFrame({
-                'date':pd.to_datetime(content['date'].astype(str), format='%Y%m%d'),
+                'date':pd.to_datetime(content['date'].astype(str), format='%Y%m%d').values.astype('datetime64[s]'),
                 'open':content['open'] * coefficient[0],
                 'high':content['high'] * coefficient[0],
                 'low':content['low'] * coefficient[0],

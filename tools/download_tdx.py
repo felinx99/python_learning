@@ -50,7 +50,16 @@ date_fmt = {
     DATAFRAME.MINUTE1: '%Y-%m-%d %H:%M',
 }
 
-def read_tdx_files(srcfile:Path, dateframe:DATAFRAME):
+stock_csvtype = {
+    'open': 'float32',
+    'high': 'float32',
+    'low': 'float32',
+    'close': 'float32',
+    'volume': 'float32',
+}
+
+def read_tdx_files(args):
+    srcfile, dateframe = args
     tdxread = TdxDailyBarReader() if dateframe == DATAFRAME.DAY else TdxLCMinBarReader()
 
     try:
@@ -65,16 +74,17 @@ def read_tdx_files(srcfile:Path, dateframe:DATAFRAME):
     df_src = df_src.drop('amount', axis=1)
     
     if not dstfile.exists():
-        df_src.to_csv(dstfile, sep=',', encoding='utf-8-sig', index=False, date_format=date_fmt[date], float_format='%.2f') 
+        df_src.to_csv(dstfile, sep=',', encoding='utf-8-sig', index=False, date_format=date_fmt[dateframe], float_format='%.2f')
     else:
-        df_dst = pd.read_csv(dstfile)
-        df_dst['date'] = pd.to_datetime(df_dst['date'], format=date_fmt[dateframe])
+        df_dst = pd.read_csv(dstfile, dtype=stock_csvtype, parse_dates=['date'])
+        df_dst['date'] = df_dst['date'].astype('datetime64[s]')
         
         new_data_to_add = df_src[df_src['date'] > df_dst.iloc[-1, 0]]
 
         if not new_data_to_add.empty:
             df_dst = pd.concat([df_dst, new_data_to_add], ignore_index=True)
             df_dst.to_csv(dstfile, sep=',', encoding='utf-8-sig', index=False, date_format=date_fmt[dateframe], float_format='%.2f')
+            
     return True
 
 def init_tdx():
@@ -87,11 +97,14 @@ def init_tdx():
 
     #获取物理核心数，多进程处理
     physical_cores = psutil.cpu_count(logical=False)
-    if __name__ == '__main__':
-        with Pool(physical_cores) as p:
-            #starmap会自动将task_filelist解包传给函数
-            results = p.starmap(read_tdx_files, task_filelist)
-            print(f"processed {len(results)}/{len(task_filelist)} files, failed {len(task_filelist)-sum(results)}.")
+
+    with Pool(physical_cores) as p:
+        #starmap会自动将task_filelist解包传给函数
+        results = p.imap_unordered(read_tdx_files, task_filelist, chunksize=200)
+        for i, res in enumerate(results):
+            if res is None:
+                continue
+            print(f"已处理: {i+1}/{len(task_filelist)}...", end='\r')
 
 
 
@@ -125,16 +138,7 @@ if __name__ == '__main__':
     TICKERS_DF = pd.read_csv(TICKERLIST_PATH_SRC, skiprows=1, header=None)
     new_list = []					
 
-    '''
-    for fname in read_tdx_files(0):
-        matching_rows_df = TICKERS_DF[TICKERS_DF.iloc[:, 0] == fname]
-        if not matching_rows_df.empty:
-            new_list = new_list + matching_rows_df.apply(tuple, axis=1).tolist()
 
-    print(f'newlist len: {len(new_list)}')
-    df = pd.DataFrame(data=new_list, columns=('ts_code', 'symbol', 'name', 'area', 'industry', 'list_date'))
-    df.to_csv(TICKERLIST_PATH_DEST, sep=',', encoding='utf-8-sig', index=False)
-    '''
     
     with TimeProfile():
         init_tdx()
