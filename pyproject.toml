@@ -11,7 +11,14 @@ requires-python = ">=3.12"
 dependencies = [
     "pandas (>=3.0.1,<4.0.0)",
     "numpy (>=2.4.2,<3.0.0)",
-    "ta-lib (>=0.6.8,<0.7.0)"
+    "ta-lib (>=0.6.8,<0.7.0)",
+    "psutil (>=7.2.2,<8.0.0)",
+    "yfinance (>=1.2.0,<2.0.0)",
+    "eventkit (>=1.0.3,<2.0.0)",
+    "scipy (>=1.17.1,<2.0.0)",
+    "tushare (>=1.4.24,<2.0.0)",
+    "akshare (>=1.18.30,<2.0.0)",
+    "zmq (>=0.0.0,<0.0.1)",
 ]
 package-mode = false
 
@@ -22,3 +29,8 @@ build-backend = "poetry.core.masonry.api"
 
 # 使用相对路径指向旁边的项目
 backtrader = { path = "../backtrader", editable = true }
+
+[dependency-groups]
+dev = [
+    "ruff (>=0.15.4,<0.16.0)"
+]

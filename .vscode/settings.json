@@ -2,7 +2,8 @@
     //指定使用项目虚拟环境编译器
     "python.defaultInterpreterPath": ".\\.venv\\Scripts\\python.exe",
     //每次打开终端时自动激活该环境
-    "python.terminal.activateEnvInSelectedTerminal": true,
+    //"python.terminal.activateEnvInSelectedTerminal": true,
+    "terminal.integrated.environmentChangesRelaunch": true,
     //隐藏指定目录
     "files.exclude": {
         "**/.venv": true,

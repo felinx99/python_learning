@@ -1,5 +1,7 @@
 config.local.json
 __pycache__
+data/stk/
+data/cash/
 data/price/
 data/info/*.p
 data/info/us*.csv

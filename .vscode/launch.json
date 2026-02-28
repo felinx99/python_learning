@@ -1,0 +1,193 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "tools: tushare_data",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "tools.download_tushare",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "args": [
+                //{save, update, list} 必设一个
+                //"--save",   //保存全部股票到指定日期
+                //"--update", //更新全部股票到最新
+                "--list", //保存股票列表
+                //"--check", 
+                "--fpath=E:\\datas\\cn\\stock_2024_2025", //末级路径不带\\，影响调用上级目录
+                "--start=20240101", //start 必设
+                "--end=20251231", //end 必设
+            ]
+        },
+
+        {
+            "name": "tools: tdx_data",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "tools.download_tdx",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "args": [
+                //{save, update, list} 必设一个
+                //"--save",   //保存全部股票到指定日期
+                //"--update", //更新全部股票到最新
+                //"--list", //保存股票列表
+                "--fpath=E:\\datas\\tdx", //末级路径不带\\，影响调用上级目录
+                "--start=20170601", //start 必设
+                "--end=20240601", //end 必设
+            ]
+        },
+
+
+        {
+            "name": "backtest: A-stock",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.stocktest",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+    
+            "args": [
+                "backtest", //runmode 必设，
+                "MACD", //strategy 必设
+                "--datatype=file", //datatype 必设 
+                "--start=20240101", //start 必设
+                "--end=20261231", //end 必设
+                "--cash=100000", //cash 可选
+                "--verbose",  //可选
+                "--plot= plot=True, volume=False",   //可选
+                "--plotreturns", //可选
+                "--kwargs=riskfreerate=0.035, cheat_on_open=True", //必设
+            ]
+        },
+
+        {
+            "name": "backtest: AI-stockpick",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.AIstrategy",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+    
+            "args": [
+                "backtest", //runmode 必设，
+                "MACD", //strategy 必设
+                "--datatype=file", //datatype 必设 
+                "--start=20240101", //start 必设
+                "--end=20261231", //end 必设
+                "--cash=100000", //cash 可选
+                "--verbose",  //可选
+                "--plot= plot=True, volume=False",   //可选
+                "--plotreturns", //可选
+                "--kwargs=riskfreerate=0.035, cheat_on_open=True", //必设
+            ]
+        },
+
+        {
+            "name": "backtest: tdx_quant",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.tdxquant",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+    
+            "args": [
+                "backtest", //runmode 必设，
+                "MACD", //strategy 必设
+                "--datatype=file", //datatype 必设 
+                "--start=20240101", //start 必设
+                "--end=20261231", //end 必设
+                "--cash=100000", //cash 可选
+                "--verbose",  //可选
+                "--plot= plot=True, volume=False",   //可选
+                "--plotreturns", //可选
+                "--kwargs=riskfreerate=0.035, cheat_on_open=True", //必设
+            ]
+        },
+
+        {
+            "name": "backtest: annual_report",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.annual_stock_analysis",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+
+        {
+            "name": "backtest: min volume",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.minvolume",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+    
+            "args": [
+                "backtest", //runmode 必设，
+                "MACD", //strategy 必设
+                "--datatype=file", //datatype 必设 
+                "--start=20240101", //start 必设
+                "--end=20251231", //end 必设
+                "--cash=100000", //cash 可选
+                "--verbose",  //可选
+                "--plot= plot=True, volume=False",   //可选
+                "--plotreturns", //可选
+                "--kwargs=riskfreerate=0.035, cheat_on_open=True", //必设
+            ]
+        },
+
+        {
+            "name": "backtest: myModule",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.run",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+    
+            //runmode [backtest, trading]
+            //strategy [CrossOver, BuyAndHold, WeightedHold, NCAV]
+            //tickers AAPL,GOOL,EURUSD,GBPUSD,USDJPY
+            //universe [sp500, faang, sp500_tech, sp100, forex_m7]
+            //datatype [file,historical_limit,realtime, historical_update]
+            //start 必设 '2020-09-01'或 ''
+            //end 必设 '2021-12-31'或 ''
+            //cash 必设
+            //verbose
+            //plot
+            //plotreturns
+            //kwargs， kwargs中类型会强制转为字符串型
+            "args": [
+                "trading", //runmode 必设，
+                "MACD", //strategy 必设
+                "--tickers=EURUSD", //
+                "--datatype=realtime", //datatype 必设 
+                "--start=2024-01-01", //start 必设
+                "--end=2025-09-26", //end 必设
+                "--cash=100000", //cash 可选
+                "--verbose",  //可选
+                "--plot",   //可选
+                "--plotreturns", //可选
+                "--kwargs=riskfreerate=0.035, cheat_on_open=True", //必设
+            ]
+        },
+
+
+        {
+            "name": "Python Debugger: Module",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "enter-your-module-name"
+        }
+    ]
+}

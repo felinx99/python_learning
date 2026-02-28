@@ -59,7 +59,7 @@ class TdxDailyBarReader(BaseReader):
             
         security_type = self.get_security_type(fname)
         if security_type not in self.SECURITY_TYPE:
-            print(f"Unknown security type:{security_type} file:{fname}!\n")
+            #print(f"Unknown security type:{security_type} file:{fname}!")
             raise NotImplementedError
 
         coefficient = self.SECURITY_COEFFICIENT[security_type]
