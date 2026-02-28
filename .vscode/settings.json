@@ -1,0 +1,19 @@
+{
+    //指定使用项目虚拟环境编译器
+    "python.defaultInterpreterPath": ".\\.venv\\Scripts\\python.exe",
+    //每次打开终端时自动激活该环境
+    "python.terminal.activateEnvInSelectedTerminal": true,
+    //隐藏指定目录
+    "files.exclude": {
+        "**/.venv": true,
+        "**/.github": true,
+        "**/__pycache__": true,
+        "**/.pytest_cache": true
+    },
+    //搜索排除目录
+    "search.exclude": {
+        "**/.venv": true,
+        "**/__pycache__": true,
+        "**/github": true
+    }
+}

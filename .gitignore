@@ -9,10 +9,8 @@ tools/log/log
 logs/
 back/
 .ipynb_checkpoints
-.vscode
 .pylintrc
 fast_arrow_auth.json
-
 
 # Ignore poetry files
 .venv/
