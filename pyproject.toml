@@ -1,0 +1,17 @@
+[project]
+name = "python-learn"
+version = "0.1.0"
+description = "量化策略集合"
+authors = [
+    {name = "felinx99",email = "wangyu.hz@hotmail.com"}
+]
+license = {text = "GPL_3.0"}
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
