@@ -3,7 +3,7 @@
     "python.defaultInterpreterPath": ".\\.venv\\Scripts\\python.exe",
     //每次打开终端时自动激活该环境
     //"python.terminal.activateEnvInSelectedTerminal": true,
-    "terminal.integrated.environmentChangesRelaunch": true,
+    //"terminal.integrated.environmentChangesRelaunch": true,
     //隐藏指定目录
     "files.exclude": {
         "**/.venv": true,
@@ -14,7 +14,8 @@
     //搜索排除目录
     "search.exclude": {
         "**/.venv": true,
+        "**/.github": true,
         "**/__pycache__": true,
-        "**/github": true
+        "**/.pytest_cache": true
     }
 }
