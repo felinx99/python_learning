@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import sys
-sys.path.append('D:/new_tdx/PYPlugins/user')
+sys.path.append('D:/new_tdx_test/PYPlugins/user')
 from tqcenter import tq # type: ignore
 import tushare as ts
 import akshare as ak
@@ -82,7 +82,7 @@ class TdxFeed(FeedBase):
                     df = df.sort_values(by=conf_type['sort'], ascending=[True, True])  #按股票代码和日期排序
                     df = df.reset_index(drop=True)  #重置索引
                 df.columns = df.columns.str.lower()
-        return df
+        return df[['date', 'symbol', 'open', 'high', 'low', 'close', 'volume']]
     
     def init_feed(self, **kwargs):
         print("初始化通达信数据源")
@@ -91,7 +91,7 @@ class TdxFeed(FeedBase):
 
     def get_stocklist_in_index(self, **kwargs):
         sector = kwargs.get('sector', None)
-        stock_list = tq.get_stock_list_in_sector(sector)
+        stock_list = tq.get_stock_list_in_sector(sector, list_type=1)
         df = pd.DataFrame(stock_list)
         mapping = {0: 'stock_code', '1': 'stock_name'}
         df.rename(columns=mapping, inplace=True)
@@ -108,8 +108,7 @@ class TdxFeed(FeedBase):
             'SECTOR_L1': '16'  #行业一级
         }
         market = market_map.get(market, None)
-        #index_list = tq.get_stock_list(market=market, list_type=1)  #默认获取所有A股
-        index_list = tq.get_stock_list(market=market)  #默认获取所有A股
+        index_list = tq.get_stock_list(market=market, list_type=1)
         df = pd.DataFrame(index_list)
         mapping = {0: 'sector_code', '1': 'sector_name'}
         df.rename(columns=mapping, inplace=True)
@@ -125,7 +124,7 @@ class TdxFeed(FeedBase):
         if type(symbol) is not list:
             symbol = [symbol]
         daily_dict = tq.get_market_data(
-            field_list=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'],
+            field_list=[],
             stock_list=symbol,
             start_time=start_date,
             end_time=end_date,

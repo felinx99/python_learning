@@ -1,5 +1,5 @@
 import sys
-sys.path.append('D:/new_tdx/PYPlugins/user')
+sys.path.append('D:/new_tdx_test/PYPlugins/user')
 import pandas as pd
 import talib as ta
 import numpy as np
@@ -51,7 +51,7 @@ def data_to_df(data):
 tq.initialize(__file__)
 
 #1.基础配置
-batch_codes = tq.get_stock_list_in_sector('通达信88') #目标板块
+batch_codes = tq.get_stock_list_in_sector('通达信88',list_type = 1) #目标板块
 start_time = '20200101' #数据起始时间
 target_end = '' #datetime.now().strftime('%Y%m%d') #数据结束时间
 target_gain = 5.0

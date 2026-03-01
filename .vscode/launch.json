@@ -49,7 +49,7 @@
             "type": "debugpy",
             "console": "integratedTerminal",
             "request": "launch",
-            "module": "backtest.stocktest",
+            "module": "backtest.bt_stockpick",
             "cwd": "${workspaceFolder}",
             "justMyCode": false,
     
@@ -64,6 +64,42 @@
                 "--plot= plot=True, volume=False",   //可选
                 "--plotreturns", //可选
                 "--kwargs=riskfreerate=0.035, cheat_on_open=True", //必设
+            ]
+        },
+
+        {
+            "name": "backtest: vb-backtest",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.vb_stockpick",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+    
+            "args": [
+                "backtest", //runmode 必设，
+                "MACD", //strategy 必设
+                "--datatype=file", //datatype 必设 
+                "--start=20240101", //start 必设
+                "--end=20261231", //end 必设
+                "--cash=100000", //cash 可选
+                "--verbose",  //可选
+                "--plot= plot=True, volume=False",   //可选
+                "--plotreturns", //可选
+                "--kwargs=riskfreerate=0.035, cheat_on_open=True", //必设
+            ]
+        },
+
+        {
+            "name": "backtest: vb-test",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.vb_test",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+    
+            "args": [
             ]
         },
 
