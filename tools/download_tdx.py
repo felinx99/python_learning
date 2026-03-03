@@ -2,6 +2,8 @@ import argparse
 import itertools
 import psutil
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from enum import IntEnum
 from datetime import datetime, timedelta
@@ -55,7 +57,7 @@ stock_csvtype = {
     'high': 'float32',
     'low': 'float32',
     'close': 'float32',
-    'volume': 'float32',
+    'volume': 'float64',
 }
 
 sector_type = {
@@ -63,24 +65,36 @@ sector_type = {
     'hold' : 'SECTOR_HOLD', #持仓股
     'all' : 'SECTOR_ALL',   #所有A股
     'concept' : 'SECTOR_CONCEPT',   #概念板块
-    'l1' : 'SECTOR_L1'  #行业一级
+    'l1' : 'SECTOR_L1',  #行业一级
+    'l2' : 'SECTOR_L2',
+    'l3' : 'SECTOR_L3'
 }
 
-def save_csvfile(path=None, data=None, datefmt=None):
+def save_csvfile(path=None, data=None, period=None):
+    datefmt = date_fmt[period]
+    
     if not path.exists():
+        data['date'] = data['date'].astype('datetime64[s]')
         data.to_csv(path, sep=',', encoding='utf-8-sig', index=False, date_format=datefmt, float_format='%.2f')
+        return data
     else:
         try:
             df_dst = pd.read_csv(path, dtype=stock_csvtype, parse_dates=['date'])
         except Exception as e:
-            return False
-        df_dst['date'] = df_dst['date'].astype('datetime64[s]')
-        
+            return None
+
+        df_dst['date'] = df_dst['date'].astype('datetime64[s]')      
         new_data_to_add = data[data['date'] > df_dst.iloc[-1, 0]]
 
         if not new_data_to_add.empty:
             df_dst = pd.concat([df_dst, new_data_to_add], ignore_index=True)
             df_dst.to_csv(path, sep=',', encoding='utf-8-sig', index=False, date_format=datefmt, float_format='%.2f')
+            
+        if period == DATAFRAME.DAY:
+            return df_dst
+        else:
+            return None
+ 
 
 def read_tdx_files(args):
     srcfile, dateframe = args
@@ -89,17 +103,20 @@ def read_tdx_files(args):
     try:
         df_src = tdxread.get_df(f"{srcfile}")
     except Exception as e:
-        return False
-
-    fname = f"{srcfile.stem[2:]}.{srcfile.stem[:2].upper()}.csv"
-    dstfile = Path(dst_dir[dateframe]) / fname
+        return None
+    
+    symbol = f"{srcfile.stem[2:]}.{srcfile.stem[:2].upper()}"
+    dstfile = Path(dst_dir[dateframe]) / f"{symbol}.csv"
 
     # 转换处理
     df_src = df_src.drop('amount', axis=1)
     
-    save_csvfile(dstfile, df_src, date_fmt[dateframe])
+    new_pbrows = save_csvfile(dstfile, df_src, dateframe)
+    if new_pbrows is not None:
+        new_pbrows['symbol'] = symbol
+        return new_pbrows
 
-    return True
+    return None
 
 def download_stock():
     task_filelist = []
@@ -111,15 +128,29 @@ def download_stock():
 
     #获取物理核心数，多进程处理
     physical_cores = psutil.cpu_count(logical=False)
+    pb_data = []
 
     with Pool(physical_cores) as p:
         #starmap会自动将task_filelist解包传给函数
         
         results = p.imap_unordered(read_tdx_files, task_filelist, chunksize=200)
         for i, res in enumerate(results):
-            if res is None:
-                continue
+            if res is not None:
+                pb_data.append(res)
             print(f"已处理: {i+1}/{len(task_filelist)}...", end='\r')
+
+    #将pb_data写入Parquet
+    if pb_data:
+        final_df = pd.concat(pb_data, ignore_index=True)
+        for col, dtype in stock_csvtype.items():
+            final_df[col] = final_df[col].astype(dtype)
+        
+        pb_path = Path(dst_dir[DATAFRAME.DAY]) /'all_stock_daily.parquet'
+        header = not Path(pb_path).exists()
+        table = pa.Table.from_pandas(final_df)
+        
+        with pq.ParquetWriter(pb_path, table.schema, compression='snappy') as writer:
+            writer.write_table(table)
 
 
 def download_sector_list(datafeed=None, listfile=None, sector=None):
@@ -142,8 +173,8 @@ def download_sector_daily(datafeed=None, listfile=None, sector=None):
     start_date = '20200101'
 
     for _, sector_code in concept_list_df.iterrows():
-        fname = f"{sector_code[0]}.csv"
-        dstfile = Path(SECTOR_PATH)/sector/'daily'/fname
+        symbol = f"{sector_code[0]}"
+        dstfile = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}.csv"
 
         if dstfile.exists():
             #如果文件存在，仅下载最近5天数据
@@ -155,20 +186,39 @@ def download_sector_daily(datafeed=None, listfile=None, sector=None):
             print(f"获取数据{sector_code[0]}失败: {e}")
             continue
     
-        save_csvfile(path=dstfile, data=hist, datefmt=date_fmt[DATAFRAME.DAY])
+        new_pbrows = save_csvfile(path=dstfile, data=hist, period=DATAFRAME.DAY)
+
+        if new_pbrows is not None:
+            new_pbrows['symbol'] = symbol
+            return new_pbrows
 
 def update_sector_daily():
     #每天上传到通达信板块指数内
     pass
 
-def download_sector(sector='concept'):
+def download_sector(sectorlist=[]):
     feed = datafeed.FeedManager.register('tdx')
     feed.init_feed()
-    sectorfile = Path(SECTOR_PATH)/sector/f"{sector}_list.csv"
+    
+    pb_data = []
 
-    download_sector_list(datafeed=feed, listfile=sectorfile, sector=sector)
-    download_sector_daily(datafeed=feed, listfile=sectorfile, sector=sector)
-    update_sector_daily()
+    for sector in sectorlist:
+        sectorfile = Path(SECTOR_PATH)/sector/f"{sector}_list.csv"
+        download_sector_list(datafeed=feed, listfile=sectorfile, sector=sector)
+        res = download_sector_daily(datafeed=feed, listfile=sectorfile, sector=sector)
+        if res is not None:
+            pb_data.append(res)
+
+    if pb_data:
+        final_df = pd.concat(pb_data, ignore_index=True)
+        for col, dtype in stock_csvtype.items():
+            final_df[col] = final_df[col].astype(dtype)
+        
+        pb_path = Path(SECTOR_PATH) /'all_sector_daily.parquet'
+        table = pa.Table.from_pandas(final_df)
+        
+        with pq.ParquetWriter(pb_path, table.schema, compression='snappy') as writer:
+            writer.write_table(table)
 
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser()
@@ -197,15 +247,12 @@ if __name__ == '__main__':
 
     assert TICKERLIST_PATH_SRC.exists(), f"Error: '{TICKERLIST_PATH_SRC}'"
     
-    TICKERS_DF = pd.read_csv(TICKERLIST_PATH_SRC, skiprows=1, header=None)
-    new_list = []					
-
-
+    TICKERS_DF = pd.read_csv(TICKERLIST_PATH_SRC, skiprows=1, header=None)				
     
     with TimeProfile():
         download_stock()
-        download_sector(sector='concept')
-        download_sector(sector='l1')
+        download_sector(sectorlist=['concept', 'l1', 'l2', 'l3'])
+
 
 
 

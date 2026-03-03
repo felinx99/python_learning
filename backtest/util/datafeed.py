@@ -105,7 +105,10 @@ class TdxFeed(FeedBase):
             'SECTOR_HOLD': '1',  #持仓股
             'SECTOR_ALL': '5',  #所有A股
             'SECTOR_CONCEPT': '12',  #概念板块
-            'SECTOR_L1': '16'  #行业一级
+            'SECTOR_L1': '16',  #行业一级
+            'SECTOR_L2' : '17', #行业二级
+            'SECTOR_L3' : '18' #行业三级
+
         }
         market = market_map.get(market, None)
         index_list = tq.get_stock_list(market=market, list_type=1)
