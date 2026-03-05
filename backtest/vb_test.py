@@ -6,7 +6,7 @@ from pathlib import Path
 from dateutil.relativedelta import relativedelta
 import gc
 
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test.csv'
+STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist.csv'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
 ENDDATE = '2025-12-26'
@@ -58,13 +58,18 @@ def get_score(pf):
     # 3. 其他指标
     counts = pf.trades.count()
     win_rate = pf.trades.win_rate().fillna(0)
+
     
     duration_series = pf.drawdowns.max_duration()
     dd_dur_days = duration_series.dt.days.fillna(0).astype(np.float32)
     dd_score = (1 - (dd_dur_days / 252.0)).clip(lower=0, upper=1)
 
     calmar = ann_ret / max_dd
+    # 获取期末总资产（100万变成了多少）
+    final_value = pf.value().iloc[-1]
     
+    # 获取平均持仓比例（诊断资金是否一直在睡觉）
+    exposure = pf.asset_value().sum(axis=1).mean() / pf.value().mean()
     # 4. 计算得分
     score = (0.4 * calmar) + (0.2 * dd_score) + (0.2 * sharpe) + (0.2 * win_rate)
     
@@ -78,7 +83,9 @@ def get_score(pf):
         'max_dd': max_dd,
         'sharpe': sharpe,
         'win_rate': win_rate,
-        'dd_dur': dd_dur_days
+        'dd_dur': dd_dur_days,
+        'final_value': final_value,
+        'exposure': exposure
     })
 
 def generate_time_chunks(start_date, end_date, split_window, roll_step):
@@ -159,8 +166,8 @@ if __name__ == '__main__':
             exits_np = ((r_vals > 70) | (p_vals < f_vals)).astype(np.bool_)
             
             group_indices = np.repeat(np.arange(len(combo_batch)), len(window_price.columns))
-            pf = vbt.Portfolio.from_signals(close=p_vals, entries=entries_np, exits=exits_np,size=0.01, size_type='Percent', call_seq='random',
-                accumulate=True, slippage=0.001, init_cash=1000000,cash_sharing=True, group_by=group_indices, fees=0.002, freq='D', direction='longonly'
+            pf = vbt.Portfolio.from_signals(close=p_vals, entries=entries_np, exits=exits_np,size=0.02, size_type='Percent', call_seq='random',
+                accumulate=False, slippage=0.001, init_cash=1000000,cash_sharing=True, group_by=group_indices, fees=0.002, freq='D', direction='longonly'
             )
             '''
             # --- 深度透视：解剖第一组参数的第一笔交易 ---
@@ -199,8 +206,8 @@ if __name__ == '__main__':
                 print(f"❌ 诊断执行失败: {e}")
             '''
             # 诊断：看看这一批次到底产生了多少笔交易
-            #total_trades = pf.trades.count().sum()
-            #print(f"DEBUG: 当前批次总交易笔数: {total_trades}")
+            total_trades = pf.trades.count().sum()
+            print(f"DEBUG: 当前批次总交易笔数: {total_trades}")
             '''
             # --- 维度与层级诊断诊断开始 ---
             print("\n" + "📊" * 5 + " MultiIndex 层级深度分析 " + "📊" * 5)
@@ -290,6 +297,7 @@ if __name__ == '__main__':
             print(f" 收益表现: 年化收益={row['ann_ret']*100:.2f}% | 卡玛比率={row['calmar_avg']:.2f} | 夏普={row['sharpe']:.2f}")
             print(f" 交易质量: 胜率={row['win_rate']*100:.2f}%")
             print(f" 风险控制: 最大回撤={row['max_dd']*100:.2f}% | 平均最大回撤持续={int(row['dd_dur'])}天")
+            print(f" 资金占用: 期末资产={row['final_value']:.2f} | 持仓占比={row['exposure']:.2f}")
             print("-" * 60)
 
         best_p = top_3.index[0]
