@@ -1,12 +1,18 @@
+import ast
 import vectorbt as vbt
 import pandas as pd
 import numpy as np
 import itertools
+import re
 from pathlib import Path
 from dateutil.relativedelta import relativedelta
 import gc
+from . import sectorpick
+from .util.breakout import BreakoutMonitor
+import seaborn as sns
+import matplotlib.pyplot as plt
 
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist.csv'
+STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test.csv'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
 ENDDATE = '2025-12-26'
@@ -19,6 +25,80 @@ stock_csvtype = {
     'volume': 'float64',
 }
 
+def trendup_logic():
+    sectorslist_df = sectorpick.get_up_sector(sectorlist=['concept', 'l3'], ret='daily')
+    stocklist_df = sectorpick.get_daily_list_in_sector(sectorslist_df)
+    return stocklist_df
+
+def check_broadcast_compatibility(dfs_dict):
+    """
+    检查所有输入矩阵是否具备 100% 的广播兼容性
+    """
+    first_key = list(dfs_dict.keys())[0]
+    ref = dfs_dict[first_key]
+    
+    print(f"--- 🛠️ 深度兼容性自查 (基准: {first_key}) ---")
+    results = []
+    for name, df in dfs_dict.items():
+        # 基本一致性检查
+        idx_match = ref.index.equals(df.index)
+        col_match = ref.columns.equals(df.columns)
+        idx_name_match = ref.index.name == df.index.name
+        col_name_match = ref.columns.name == df.columns.name
+        dtype_match = ref.values.dtype == df.values.dtype
+        
+        # 内存对象检查 (vectorbt 的隐藏要求)
+        idx_is_same = ref.index is df.index
+        col_is_same = ref.columns is df.columns
+        
+        status = "✅" if (idx_match and col_match and idx_name_match and col_name_match) else "❌"
+        
+        print(f"{status} [{name:8}] Shape: {df.shape} | index name:{df.index.name} | colname:{df.columns.name} | Dtype: {df.values.dtype}")
+        if status == "❌":
+            print(f"   ∟ Index一致: {idx_match} | Col一致: {col_match}")
+            print(f"   ∟ Index名: '{df.index.name}' | Col名: '{df.columns.name}'")
+        
+        results.append(status == "✅")
+    return all(results)
+
+
+def custom_strategy_logic(close, high, low, k_window=14, d_window=3, atr_window=14, atr_threshold=0.02):
+    """
+    策略逻辑：
+    - 入场：%K线 在超卖区(20)向上穿过 %D线，且当前波动率(ATR/Price) > 阈值（避开横盘僵尸股）
+    - 出场：%K线 进入超买区(80) 或 价格跌破快线均线
+    """
+    # 计算 STOCH (%K, %D)
+    stoch = vbt.STOCH.run(high, low, close, k_window=k_window, d_window=d_window)
+    fast_k = stoch.k.values.astype(np.float32)
+    slow_d = stoch.d.values.astype(np.float32)
+    
+    # 计算 ATR 波动率过滤（相对于价格的比例）
+    atr = vbt.ATR.run(high, low, close, window=atr_window).atr.values.astype(np.float32)
+    volatility_filter = (atr / close.values) > atr_threshold
+    
+    # 定义信号矩阵
+    # 入场：K线在20以下上穿D线，且有足够波动率
+    entries = (fast_k < 20) & (fast_k > slow_d) & volatility_filter
+    
+    # 出场：K线超过80，或者简单的均线离场
+    exits = (fast_k > 80)
+    
+    return entries, exits
+
+def prepare_stocks(src_df=None, values=[]):
+    #对数据进行预处理，src_df可以是股票，也可以是板块，可以是单只也可以是股票组合
+    ret_list = {}
+    for col in values:
+        col_df = f'{col}_df'
+        col_df = src_df.pivot(index='date', columns='symbol', values=col)
+
+        col_df.index = pd.to_datetime(col_df.index)
+        col_df = col_df.sort_index().ffill().astype(np.float32).dropna(how='all')  #剔除全为空的行dropna(how='all')
+        ret_list[col] = col_df
+
+    return ret_list
+
 def load_all_stocks(stocklist):
     close_dict = {}
 
@@ -28,17 +108,17 @@ def load_all_stocks(stocklist):
     try:
         full_df = pd.read_parquet(srcpath, engine='pyarrow')
     except Exception as e:
-        print(f'宽表读取失败：{e}')
+        print(f'日线数据读取失败：{e}')
 
     full_df = full_df[full_df['symbol'].isin(target_tickers)]
     return full_df
 
-def prepare_all_stocks(src_df):
-    close_df = src_df.pivot(index='date', columns='symbol', values='close')
+def get_stock_inlist(df=None, stocklist=None):
+    target_tickers = [str(ticker) for ticker, founddate in stocklist]
+    partstocks = df[df['symbol'].isin(target_tickers)]
+    return partstocks
 
-    close_df.index = pd.to_datetime(close_df.index)
-    close_df = close_df.sort_index().ffill().astype(np.float32).dropna(how='all')  #剔除全为空的行dropna(how='all')
-    return close_df
+
 
 # 4. 定义评分函数 (复用你之前的多维度逻辑)
 def get_score(pf):
@@ -87,7 +167,33 @@ def get_score(pf):
         'final_value': final_value,
         'exposure': exposure
     })
+    '''
+    # 年化收益
+    ann_ret = pf.annualized_return()
+    # 夏普
+    sharpe = pf.sharpe_ratio()
+    # 胜率
+    win_rate = pf.trades.win_rate()
+    # 最大回撤
+    max_dd = pf.max_drawdown()
+    # 持仓占比 (Exposure)
+    exposure = (pf.assets_value().sum(axis=1) / pf.value()).mean()
+    # 期末资产
+    final_value = pf.value().iloc[-1]
+    # 综合得分 (示例：收益 * 胜率 / (回撤 + 0.01))
+    score = (ann_ret * win_rate) / (max_dd + 0.01)
 
+    return pd.DataFrame({
+        'score': score,
+        'ann_ret': ann_ret,
+        'sharpe': sharpe,
+        'win_rate': win_rate,
+        'max_dd': max_dd,
+        'exposure': exposure,
+        'final_value': final_value,
+        'dd_dur': pf.stats()['Max Drawdown Duration'].days if 'Max Drawdown Duration' in pf.stats() else 0
+    })
+    '''
 def generate_time_chunks(start_date, end_date, split_window, roll_step):
     current_start = start_date
     chunks = []
@@ -110,12 +216,66 @@ def chunked_iterable(iterable, size):
     for i in range(0, len(iterable), size):
         yield iterable[i:i + size]
 
+#参数热力图
+def plot_parameter_heatmap(df, index_param='short', column_param='long', score_col='score'):
+    # 聚合所有维度，只保留我们关心的两个参数轴
+    plot_df = df.reset_index().groupby([index_param, column_param])[score_col].mean().unstack()
+    
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(plot_df, annot=True, fmt=".3f", cmap='RdYlGn', center=0)
+    plt.title(f'Parameter Heatmap: {index_param} vs {column_param}')
+    plt.xlabel(column_param)
+    plt.ylabel(index_param)
+    plt.show()
+
+#参数敏感性分析
+def plot_sensitivity(df, param_name):
+    plt.figure(figsize=(8, 6))
+    # 将 MultiIndex 重置，方便绘图
+    temp_df = df.reset_index()
+    sns.boxplot(x=param_name, y='score', data=temp_df)
+    plt.title(f'Sensitivity Analysis: {param_name}')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.show()
+
+#参数稳定性评分函数
+def get_robustness_report(all_window_data, param_names):
+    """
+    计算每个参数组合在所有时间切片上的稳定性表现
+    """
+    # 1. 按参数分组，计算得分的均值和标准差
+    grouped = all_window_data.groupby(level=param_names)['score']
+    
+    mean_score = grouped.mean()
+    std_score = grouped.std().fillna(1.0) # 防止只有一两个切片时 std 为 0
+    
+    # 2. 计算“参数收益夏普”：均值 / 标准差
+    # 这代表了该参数每承担一单位的波动，能换取多少稳定的得分
+    robustness_sharpe = mean_score / (std_score + 1e-6)
+    
+    # 3. 计算“胜率切片占比”：在多少比例的切片中得分大于 0
+    win_slices_ratio = grouped.apply(lambda x: (x > 0).mean())
+    
+    # 4. 汇总
+    robust_df = pd.DataFrame({
+        'avg_score': mean_score,
+        'score_std': std_score,
+        'stability_sharpe': robustness_sharpe,
+        'profitable_slice_pct': win_slices_ratio
+    })
+    
+    # 5. 综合评价指标：稳定性夏普 * 胜率占比 (惩罚那些偶尔大赚但经常小亏的参数)
+    robust_df['final_robust_rank'] = robust_df['stability_sharpe'] * robust_df['profitable_slice_pct']
+    
+    return robust_df.sort_values(by='final_robust_rank', ascending=False)
+    
 if __name__ == '__main__':
     # 1. 准备数据 (建议替换为你的 TDX 数据)
     TICKERS_DF = pd.read_csv(STOCKLIST_PATH, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式
     stocklist = list(TICKERS_DF.to_records(index=False))
-    src_df = load_all_stocks(stocklist)
-    price_df = prepare_all_stocks(src_df)
+    allstocks_data_df = load_all_stocks(stocklist)
+    need_cols = ['close', 'ohlc', 'volume']
+    stocks_part_dict = prepare_stocks(src_df=allstocks_data_df, values=need_cols)
 
     # 2. 数据切片，按指定的split,roll参数进行切片和滚动
     split_config = relativedelta(months=24)
@@ -128,136 +288,121 @@ if __name__ == '__main__':
     time_chunks = generate_time_chunks(start_dt, end_dt, split_config, roll_config)
     
     # 3. 参数空间
-    rsi_space = [10, 14, 20]
-    fast_space = np.arange(10, 21)
-    slow_space = [30, 40, 50, 60]
+    converged_window_space = [4,5,6]
+    converged_threshold_space = [0.025, 0.03, 0.035]
+    vol_gain_space = [1.3, 1.5, 2, 2.2]
+    short_space = (3,4,5,6,7)
+    mid_space = (8, 10, 12)
+    long_space = (20,25,30,35,40)
 
-    all_combos = list(itertools.product(rsi_space, fast_space, slow_space))
 
+    #预处理sma部分
+    all_sma_windows = sorted(list(short_space + mid_space + long_space))
+    ma_cache = {}
+    ref_columns = stocks_part_dict['close'].columns
+    for w in all_sma_windows:
+        raw_ma = vbt.MA.run(stocks_part_dict['ohlc'], window=w).ma
+        if isinstance(raw_ma.columns, pd.MultiIndex):
+            raw_ma.columns = raw_ma.columns.get_level_values('symbol')
+        ma_cache[w] = raw_ma.reindex(columns=ref_columns).astype(np.float32)
+
+    all_combos = list(itertools.product(converged_window_space,converged_threshold_space,vol_gain_space, short_space, mid_space, long_space))
 
     # 5. 循环窗口执行寻优
     window_results = []
-    
+    param_names = ['cv_w', 'ct', 'vg', 'short', 'mid', 'long']
     for i, (s_dt, e_dt) in enumerate(time_chunks):
         s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
-        window_price = price_df.loc[s_str:e_str]
+        # 局部时间切片 (宽表)
+        w_close = stocks_part_dict['close'].loc[s_str:e_str]
+        w_ohlc = stocks_part_dict['ohlc'].loc[s_str:e_str]
+        w_vol = stocks_part_dict['volume'].loc[s_str:e_str]
 
-        if len(window_price) < 100:
+        if len(w_close) < 100:
             continue
         
-        print(f"🔄 正在处理切片 {i+1}: {s_dt.strftime('%Y%m%d')} -> {e_dt.strftime('%Y%m%d')} ({len(window_price)} 行)")
+        print(f"🔄 正在处理切片 {i+1}: {s_dt.strftime('%Y%m%d')} -> {e_dt.strftime('%Y%m%d')} ({len(w_close)} 行)")
         window_scores = []
-        for combo_batch in chunked_iterable(all_combos, len(fast_space)):
-            rsi_w = [c[0] for c in combo_batch]
-            fast_w = [c[1] for c in combo_batch]
-            slow_w = [c[2] for c in combo_batch]
-            # --- 向量化计算 (保持不变) ---
-            rsi = vbt.RSI.run(window_price, window=rsi_w)
-            sma_f = vbt.MA.run(window_price, window=fast_w)
-            sma_s = vbt.MA.run(window_price, window=slow_w)
+        for combo_batch in chunked_iterable(all_combos, len(long_space)*len(short_space)*len(mid_space)):
+            #参数切片
+            cw_w = [c[0] for c in combo_batch]
+            ct_w = [c[1] for c in combo_batch]
+            vg_w = [c[2] for c in combo_batch]
+            short_w = [c[3] for c in combo_batch]
+            mid_w = [c[4] for c in combo_batch]
+            long_w = [c[5] for c in combo_batch]
             
-            # 提取矩阵数值
-            f_vals = sma_f.ma.values.astype(np.float32)
-            s_vals = sma_s.ma.values.astype(np.float32)
-            r_vals = rsi.rsi.values.astype(np.float32)
-            p_vals = np.tile(window_price.values.astype(np.float32), (1, len(combo_batch)))
+            batch_s_ma = [ma_cache[w].loc[s_str:e_str] for w in short_w]
+            batch_m_ma = [ma_cache[w].loc[s_str:e_str] for w in mid_w]
+            batch_l_ma = [ma_cache[w].loc[s_str:e_str] for w in long_w]
+            num_combos = len(batch_s_ma)
+            num_symbols = w_close.shape[1]
 
-            entries_np = ((r_vals < 30) & (f_vals > s_vals)).astype(np.bool_)
-            exits_np = ((r_vals > 70) | (p_vals < f_vals)).astype(np.bool_)
             
-            group_indices = np.repeat(np.arange(len(combo_batch)), len(window_price.columns))
-            pf = vbt.Portfolio.from_signals(close=p_vals, entries=entries_np, exits=exits_np,size=0.02, size_type='Percent', call_seq='random',
-                accumulate=False, slippage=0.001, init_cash=1000000,cash_sharing=True, group_by=group_indices, fees=0.002, freq='D', direction='longonly'
+            # 直接传入batch_s_ma，因是列表，导致run()广播报错，传入与w_close对齐的 MA 宽表列表
+            s_ma_wide = pd.concat(batch_s_ma, axis=1, keys=range(num_combos))
+            m_ma_wide = pd.concat(batch_m_ma, axis=1, keys=range(num_combos))
+            l_ma_wide = pd.concat(batch_l_ma, axis=1, keys=range(num_combos))
+            # 运行自定义指标
+            ind = BreakoutMonitor.run(
+                w_ohlc, 
+                w_close, 
+                w_vol,
+                s_ma_wide, 
+                m_ma_wide, 
+                l_ma_wide,
+                cv_w=cw_w, ct=ct_w, vg=vg_w,
+                param_product=False # 参数已一一对应
             )
-            '''
-            # --- 深度透视：解剖第一组参数的第一笔交易 ---
-            try:
-                # 选取第一个参数组合下的所有交易
-                # pf.iloc[:, 0] 代表第一个参数组合对应的一组股票
-                # 我们取出该组中所有已平仓的交易记录
-                trades_df = pf.trades.records_readable
-                
-                if not trades_df.empty:
-                    # 挑选出关键字段进行打印
-                    # Column 0 通常是第一组参数中的第一只股票
-                    print("\n" + "📑" * 5 + " 交易明细透视 (前 10 笔) " + "📑" * 5)
-                    # 获取基础数据并手动构建 DataFrame
-                    # entries 和 exits 的索引对应价格矩阵中的位置
-                    
-                    # 打印列名，让我们看看你的版本里到底叫什么
-                    #print(f"DEBUG: 可用列名: {records.columns.tolist()}")
-                    display_cols = [
-                        'Column', 'Entry Timestamp', 'Exit Timestamp', 
-                        'Direction','Size', 'Avg Entry Price', 'Avg Exit Price', 
-                        'PnL', 'Return', 'Status'
-                    ]
-                    # 按照 Return 排序，看看那个导致 inf 的交易到底长什么样
-                    print(trades_df[display_cols].sort_values(by='Return', ascending=False).head(10))
-                    
-                    # 重点检查：价格是否为 0？入场和出场是否在同一天？
-                    sample = trades_df.iloc[0]
-                    if sample['Avg Entry Price'] == 0 or sample['Avg Exit Price'] == 0:
-                        print("⚠️ 警告：检测到价格为 0 的交易，请检查 window_price 是否包含空值或 0")
-                    if sample['Entry Timestamp'] == sample['Exit Timestamp']:
-                        print("⚠️ 警告：检测到日内交易（Entry=Exit），在 freq=252 模式下可能导致年化计算溢出")
-                else:
-                    print("❌ 警告：pf.trades 为空，当前批次未产生任何有效交易")
-            except Exception as e:
-                print(f"❌ 诊断执行失败: {e}")
-            '''
-            # 诊断：看看这一批次到底产生了多少笔交易
-            total_trades = pf.trades.count().sum()
-            print(f"DEBUG: 当前批次总交易笔数: {total_trades}")
-            '''
-            # --- 维度与层级诊断诊断开始 ---
-            print("\n" + "📊" * 5 + " MultiIndex 层级深度分析 " + "📊" * 5)
-            
-            # 1. 检查原始价格索引
-            print(f"1. 原始价格列数: {len(window_price.columns)} | 示例: {window_price.columns[:2].tolist()}")
-            
-            # 2. 检查生成的信号/回测对象索引 (如果是裸数组传入，这里可能没索引)
-            # 但我们可以通过 entries (DataFrame) 来观察 vectorbt 期望的结构
-            print(f"2. 当前批次参数组数: {len(combo_batch)}")
-            
-            # 3. 核心：观察 get_score 后的 Series 结构
-            s_raw = get_score(pf)
-            print(f"3. 评分结果(s_raw) 长度: {len(s_raw)} (应等于 股票数 * 参数组数)")
-            print(f"   当前索引类型: {type(s_raw.index)}")
-            
-            # 4. 模拟手动注入索引过程
-            p_idx = pd.MultiIndex.from_tuples(combo_batch, names=['rsi', 'fast', 'slow'])
-            s_idx = window_price.columns
-            # from_product 会产生笛卡尔积，这正是 vectorbt 平铺数据的逻辑
-            full_idx = pd.MultiIndex.from_product([p_idx, s_idx])
-            
-            print(f"4. 构建的 Full_Index 层级数: {full_idx.nlevels}")
-            print(f"   层级名称: {full_idx.names}")
-            print(f"   前 3 行索引索引展示:")
-            for i in range(min(3, len(full_idx))):
-                print(f"      {full_idx[i]}")
+            # 信号诊断 (仅对每片首个 Batch 采样)
+            if len(window_scores) == 0:
+                first_combo_entries = ind.entry.iloc[:, :num_symbols]
+                daily_hits = first_combo_entries.sum(axis=1) # 提取第一组参数 (id=0) 的所有股票信号并求和
+                print(f"   [信号诊断] 首组参数日均信号: {daily_hits.mean():.2f} | 峰值: {daily_hits.max()}")
 
-            # 5. 验证对齐
-            if len(s_raw) == len(full_idx):
-                print("✅ 验证通过：评分结果长度与构建的索引完全匹配！")
-            else:
-                print(f"❌ 验证失败：评分结果({len(s_raw)}) 与 索引({len(full_idx)}) 长度不符！")
+            entries = ind.entry
+            # exit 逻辑：价格跌破对应的参数化长线均线
+            exits = ind.exit
+            columns = entries.columns
+            raw_group_labels = [str(val[:-1]) for val in columns.values]
+            sorted_indices = np.argsort(raw_group_labels)
+            entries_sorted = entries.iloc[:, sorted_indices]
+            exits_sorted = exits.iloc[:, sorted_indices]
+            # 同步排序标签
+            group_labels_sorted = [raw_group_labels[i] for i in sorted_indices]
+            # 运行组合回测
+            pf = vbt.Portfolio.from_signals(
+                close=w_close,
+                entries=entries_sorted,
+                exits=exits_sorted, 
+                size=0.02, # 单次开仓2%
+                size_type='Percent',
+                cash_sharing=True,
+                call_seq='random',
+                fees=0.002,
+                slippage=0.001,
+                freq='D',
+                init_cash=1000000,
+                sl_stop=0.15,          # 15% 固定止损
+                group_by=group_labels_sorted # 按参数组合分组计算
+            )
             
-            print("📊" * 15 + "\n")
-            # --- 维度与层级诊断结束 ---
-            '''
-
             # 收集多维度指标 
             batch_score = get_score(pf)
-            batch_score.index = pd.MultiIndex.from_tuples(combo_batch, names=['rsi', 'fast', 'slow'])
-            batch_score.index = pd.MultiIndex.from_tuples(
-                combo_batch, 
-                names=['rsi', 'fast', 'slow']
-            )
-            #聚合参数：level=[0,1,2] 对应 (rsi, fast, slow)
+            id_map = {str(i): combo for i, combo in enumerate(combo_batch)}
+            real_tuples = []
+            for idx_str in batch_score.index:
+                # 使用正则提取括号中最后一个数字，例如从 '(4, 0.025, 1.5, 1)' 中提取 '1'
+                match = re.search(r'(\d+)\s*\)$', str(idx_str))
+                num_id = match.group(1)
+                real_tuples.append(id_map[num_id])
+  
+            batch_score.index = pd.MultiIndex.from_tuples(real_tuples, names=param_names)
             window_scores.append(batch_score)
+
             
             #显示清理内存
-            del pf, entries_np, exits_np, rsi, sma_f, sma_s, f_vals, s_vals, r_vals, p_vals
+            del pf, s_ma_wide, m_ma_wide, l_ma_wide, ind
             gc.collect()
 
         if (end_dt - e_dt).days < 30: break
@@ -267,32 +412,38 @@ if __name__ == '__main__':
             window_df = pd.concat(window_scores)
             print(f"   ✅ 切片处理完成。当前切片最高分: {window_df['score'].max():.4f}, 平均夏普: {window_df['sharpe'].mean():.4f}")
             window_results.append(window_df)
-            window_results.append(window_df)
 
 
     # 6. 最终聚合：选出在所有时间窗口表现最稳的参数
     if window_results:
         # 将所有时间窗的数据纵向堆叠
         all_window_data = pd.concat(window_results)
-        
+        robust_report = get_robustness_report(all_window_data, param_names)
+
+        print("\n" + "🛡️" * 10 + " 参数稳定性排行榜 (跨切片表现) " + "🛡️" * 10)
+        print(robust_report.head(5))
         # 1. 计算所有窗口的平均值
-        final_df = all_window_data.groupby(level=['rsi', 'fast', 'slow']).mean()
-        
+        final_df = all_window_data.groupby(level=param_names).mean()
+        final_df['calmar_avg'] = final_df['ann_ret'] / final_df['max_dd'].replace(0, 0.01)
         # 2. 计算得分的标准差 (稳定性指标)
-        score_std = all_window_data.groupby(level=['rsi', 'fast', 'slow'])['score'].std().fillna(1.0)
+        score_std = all_window_data.groupby(level=param_names)['score'].std().fillna(1.0)
         final_df['stability_score'] = final_df['score'] / (1 + score_std)
-    
-        # 3. 重新计算卡玛比率
-        final_df['calmar_avg'] = (final_df['ann_ret'] / final_df['max_dd'].replace(0, 0.01)).fillna(0)
         
+        # 热力图
+        #plot_parameter_heatmap(robust_report, index_param='short', column_param='long', score_col='stability_sharpe')
+        #plot_parameter_heatmap(final_df, 'cv_w', 'ct')
+
+        # 敏感性分析
+        #plot_sensitivity(all_window_data, 'ct')
+
         # 按综合得分排序
-        top_3 = final_df.sort_values(by='score', ascending=False).head(3)
+        top_3 = final_df.sort_values(by='stability_score', ascending=False).head(3)
         
         print("\n" + "🏆" * 10 + " 寻优结果前三名 (全时段平均) " + "🏆" * 10)
         
         for i, (params, row) in enumerate(top_3.iterrows()):
-            rsi_val, fast_val, slow_val = params
-            print(f"【Top {i+1}】 参数组合: RSI_{rsi_val} | 快线_{fast_val} | 慢线_{slow_val}")
+            cv, ct, vg, s, m, l = params
+            print(f"【Top {i+1}】 参数: CV_{cv} | CT_{ct} | VG_{vg} | MA({s},{m},{l})")
             print(f" 综合得分: {row['score']:.4f} (稳定性参考: {row['stability_score']:.4f})")
             print(f" 收益表现: 年化收益={row['ann_ret']*100:.2f}% | 卡玛比率={row['calmar_avg']:.2f} | 夏普={row['sharpe']:.2f}")
             print(f" 交易质量: 胜率={row['win_rate']*100:.2f}%")
@@ -301,4 +452,4 @@ if __name__ == '__main__':
             print("-" * 60)
 
         best_p = top_3.index[0]
-        print(f"\n🌟 推荐最优组合: RSI={best_p[0]}, Fast={best_p[1]}, Slow={best_p[2]}")
+        print(f"\n🌟 推荐最优组合: CV={best_p[0]}, CT={best_p[1]}, VG={best_p[2]}, MA_Set=({best_p[3]},{best_p[4]},{best_p[5]})")

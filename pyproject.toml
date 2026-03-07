@@ -21,6 +21,7 @@ dependencies = [
     "zmq (>=0.0.0,<0.0.1)",
     "vectorbt @ git+ssh://git@github.com/felinx99/vectorbt.git",
     "pyarrow (>=23.0.1,<24.0.0)",
+    "seaborn (>=0.13.2,<0.14.0)",
 ]
 package-mode = false
 

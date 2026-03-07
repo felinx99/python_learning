@@ -1,71 +1,144 @@
-import vectorbt as vbt
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import talib as ta
 
-# 1. 准备数据 (建议替换为你的 TDX 数据)
-price = pd.Series(
-    np.cumsum(np.random.randn(1000)) + 100, 
-    index=pd.date_range("2022-01-01", periods=1000, freq="B"),
-    name="Close"
-)
+from pathlib import Path
+from .util import datafeed
 
-# 2. 定义参数空间
-rsi_windows = [10, 14, 20]
-fast_windows = np.arange(10, 21) # range(10, 21) 即 10 到 20
-slow_windows = [30, 40, 50, 60]
+SECTOR_PATH = 'E:\\datas\\tdx\\sector'
+SLOPE_THRESHOLD = 0.015
 
-# 3. 计算所有参数组合下的指标 (vbt 会自动进行笛卡尔积广播)
-# 使用 param_product=True 强制生成所有可能的组合
-rsi = vbt.RSI.run(price, window=rsi_windows, param_product=True)
-sma_fast = vbt.MA.run(price, window=fast_windows, param_product=True)
-sma_slow = vbt.MA.run(price, window=slow_windows, param_product=True)
+sector_type = {
+    'self' : 'SECTOR_SELF', #自选股
+    'hold' : 'SECTOR_HOLD', #持仓股
+    'all' : 'SECTOR_ALL',   #所有A股
+    'concept' : 'SECTOR_CONCEPT',   #概念板块
+    'l1' : 'SECTOR_L1',  #行业一级
+    'l2' : 'SECTOR_L2',
+    'l3' : 'SECTOR_L3'
+}
 
-# 4. 生成信号矩阵
-# 注意：vbt 会确保不同指标之间的列对齐
-entries = (rsi.rsi < 30) & (sma_fast.ma > sma_slow.ma)
-exits = (rsi.rsi > 70) | (price < sma_fast.ma)
+stock_csvtype = {
+    'open': 'float32',
+    'high': 'float32',
+    'low': 'float32',
+    'close': 'float32',
+    'volume': 'float64',
+}
 
-# 5. 执行回测 (一次性跑完 132 组策略)
-pf = vbt.Portfolio.from_signals(
-    price, 
-    entries, 
-    exits, 
-    fees=0.0003, 
-    slippage=0.001,
-    freq='B'
-)
+def calc_ols(df, column='', method=''):
+    windows_len = 5
+    N = int(''.join(filter(str.isdigit, method)))
+    # 提取数据,并价格转换为对数值，对数体现价格的等比变化程序
+    df[method] = ta.SMA(df[column].values.astype('float64'), timeperiod=N)
+    y = np.log(df[method].values)
+    n_rows = len(y)   
+    k_array = np.full(n_rows, np.nan)
+    x = np.arange(windows_len)
+    x_mean = np.mean(x)
+    sum_x2_minus_mean = np.sum((x - x_mean)**2) # 对应公式的分母
+    
+    # 只有当索引大于等于 N + (N-1) 时，才有足够的数据计算
+    start_idx = N + windows_len - 1 
+    
+    # 使用 NumPy 的滑动窗口视图提高效率
+    from numpy.lib.stride_tricks import sliding_window_view
+    
+    if n_rows >= start_idx:
+        windows = sliding_window_view(y, window_shape=windows_len)
+        # 计算斜率 k: sum((x - x_mean) * (y - y_mean)) / sum((x - x_mean)^2)
+        x_centered = x - x_mean
+        k_values = np.dot(windows, x_centered) / sum_x2_minus_mean    
+        k_array[windows_len-1:] = k_values
+    # 赋值给 DataFrame
+    column_name = f"{method}_slope"
+    df[column_name] = k_array*10
+  
+    return df
 
-# 2. 提取关键指标
-annual_return = pf.annualized_return()
-max_dd = pf.max_drawdown().abs()
-sharpe = pf.sharpe_ratio()
-win_rate = pf.trades.win_rate()
+def select_sector(df):
+    df['avg_slope'] = 0.4*df['sma5_slope'] + 0.2*df['sma10_slope'] + 0.4*df['sma20_slope']
+    #筛选条件 
+    df['slect_res'] = df['avg_slope'] > SLOPE_THRESHOLD
 
-# 3. 计算卡玛比率 (处理分母为 0 的情况)
-calmar = annual_return / max_dd.replace(0, np.nan)
-calmar = calmar.fillna(0)
+    return df['slect_res'].iloc[-1], df['avg_slope'].iloc[-1]
 
-# 4. 归一化处理 (Min-Max Scaling) 
-# 这是为了让不同量级的指标（如 0.6 的胜率和 2.0 的夏普）能在同一维度比较
-def normalize(s):
-    return (s - s.min()) / (s.max() - s.min())
+def get_up_sector(sectorlist=[], ret=''):
 
-norm_calmar = normalize(calmar)
-norm_sharpe = normalize(sharpe)
-norm_win_rate = normalize(win_rate)
+    assert ret in ['today', 'daily'], f"Params Error: 'ret={ret}'"
+    df_result = None
+    df_list = []
+    daily_treandup_sector_df = None
 
-# 5. 构建你的“甜点区”综合得分
-# 50% 卡玛 + 30% 夏普 + 20% 胜率
-final_score = (0.5 * norm_calmar) + (0.3 * norm_sharpe) + (0.2 * norm_win_rate)
+    for sector in sectorlist:
+        sectorlistpath = Path(SECTOR_PATH)/sector/f"{sector}_list.csv"
+        sectorlist_df = pd.read_csv(sectorlistpath, skiprows=1, header=None)
+        for _, sector_code in sectorlist_df.iterrows():
+            symbol = f"{sector_code[0]}"
+            sector_file = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}.csv"
+            sector_df = pd.read_csv(sector_file, dtype=stock_csvtype, parse_dates=['date'])
+            sector_df['ohlc'] = sector_df.eval('(high + 2*open + 2*close + low) / 6')
+            calc_ols(df=sector_df, column='ohlc', method='sma5')                
+            calc_ols(df=sector_df, column='ohlc', method='sma10')
+            calc_ols(df=sector_df, column='ohlc', method='sma20')
+            sector_df['symbol'] = symbol
+            sector_df['name'] = f"{sector_code[1]}"
+            #dst_file = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}_slope.csv"
+            #sector_df.to_csv(dst_file, sep=',', encoding='utf-8-sig', index=False, date_format='%Y-%m-%d', float_format='%.3f')
+            select_sector(sector_df)
+            df_list.append(sector_df.loc[sector_df['avg_slope'] > SLOPE_THRESHOLD, ['date', 'symbol', 'name', 'avg_slope']].copy())
+            
 
-# 6. 排除掉你讨厌的低收益策略 (设置硬性门槛)
-# 比如：年化收益必须大于 10%，最大回撤必须小于 25%
-mask = (annual_return > 0.10) & (max_dd < 0.25)
-filtered_score = final_score.where(mask, 0) # 不满足条件的得分为 0
+    df_result = pd.concat(df_list , ignore_index=True)
+    df_result = df_result.sort_values(['date', 'avg_slope'], ascending=False)
 
-# 7. 选出最优
-best_params = filtered_score.idxmax()
-print(f"最优参数组合: {best_params}")
-print(f"年化收益: {annual_return[best_params]:.2%}")
-print(f"最大回撤: {max_dd[best_params]:.2%}")
-print(f"卡玛比率: {calmar[best_params]:.2f}")
+    pb_path = Path(SECTOR_PATH) /'trendup_sectors_everydaily.parquet'
+    table = pa.Table.from_pandas(df_result)
+    
+    with pq.ParquetWriter(pb_path, table.schema, compression='snappy') as writer:
+        writer.write_table(table)
+
+    for daily_date, group in df_result.groupby('date'):
+        file_path = Path(SECTOR_PATH)/'daily'/f"trendup_{daily_date.strftime('%Y-%m-%d')}.csv"
+        daily_treandup_sector_df = group[['symbol','name', 'avg_slope']].sort_values('avg_slope', ascending=False)
+        daily_treandup_sector_df.to_csv(file_path, sep=',', encoding='utf-8-sig', index=False, date_format='%Y-%m-%d', float_format='%.3f')
+
+    sector_filepath = Path(SECTOR_PATH)/f"trendup_secotr_today.txt"
+    sector_list = list(daily_treandup_sector_df['symbol'])
+    #sectorname_list = list(daily_treandup_sector_df['name'])
+     
+    with open(sector_filepath, 'w', encoding='utf-8-sig') as fw:
+        fw.write('\n'.join(sector_list))
+
+    return_list = sector_list if ret=='today' else df_result
+    return return_list#, sectorname_list
+
+def get_list_in_sector(sectorlist=[]):
+    stock_list = set()
+    for sector in sectorlist:
+        templist_df = feed.get_stocklist_in_index(sector=sector)
+        #print(f'sector:{sector}, stock len: {len(templist_df)}')
+        stock_list.update(list(templist_df['Code']))
+    return list(stock_list)
+
+def get_daily_list_in_sector(sectorlist_df=None):
+    daily_list = []
+    for daily_date, group in sectorlist_df.groupby('date'):
+        sector_list = list(group['symbol'])
+        stocklist = get_list_in_sector(sector_list)
+        daily_list.append(
+                    {'date':daily_date, 'stocklist': stocklist}
+                )
+
+    return pd.DataFrame(daily_list)
+
+if __name__ == '__main__':
+    feed = datafeed.FeedManager.register('tdx')
+    feed.init_feed()
+    sectors_list = get_up_sector(sectorlist=['concept', 'l3'], ret='today')
+    sectorslist_df = get_up_sector(sectorlist=['concept', 'l3'], ret='daily')
+    feed.update_block(block_code='ZFBK', stock_list=sectors_list)
+    stocklist = get_list_in_sector(sectorlist=sectors_list)
+    stocklist_df = get_daily_list_in_sector(sectorlist_df=sectorslist_df)

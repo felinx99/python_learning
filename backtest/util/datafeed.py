@@ -26,7 +26,7 @@ class FeedBase(ABC):
     @abstractmethod
     def update_block(self, **kwargs):
         pass
-        
+
 
 class FeedProxy:
     def __init__(self, feedinstance):
@@ -91,20 +91,23 @@ class TdxFeed(FeedBase):
 
     def get_stocklist_in_index(self, **kwargs):
         sector = kwargs.get('sector', None)
-        stock_list = tq.get_stock_list_in_sector(sector, list_type=1)
+        list_type = kwargs.get('list_type', 1)
+        block_type = kwargs.get('block_type', 0) #1表示自定义板块
+        
+        stock_list = tq.get_stock_list_in_sector(block_code=sector, block_type=block_type, list_type=list_type)
         df = pd.DataFrame(stock_list)
         mapping = {0: 'stock_code', '1': 'stock_name'}
         df.rename(columns=mapping, inplace=True)
         return df
         
     def get_sector_list(self, **kwargs):
-        #market默认为全部A股, 0:自选股 1:持仓股 5:所有A股 12:概念板块 16:行业一级
+        #market默认为全部A股, 0:自选股 1:持仓股 5:所有A股 12:概念板块 15:缺省行业分类+概念板块 16:行业一级
         market = kwargs.get('sector_type', None)
         market_map = {
             'SECTOR_SELF': '0',  #自选股
             'SECTOR_HOLD': '1',  #持仓股
             'SECTOR_ALL': '5',  #所有A股
-            'SECTOR_CONCEPT': '12',  #概念板块
+            'SECTOR_CONCEPT': '15',  #概念板块
             'SECTOR_L1': '16',  #行业一级
             'SECTOR_L2' : '17', #行业二级
             'SECTOR_L3' : '18' #行业三级
@@ -139,13 +142,12 @@ class TdxFeed(FeedBase):
         return df
     
     def update_block(self, **kwargs):
-        print("更新Tushare板块数据")
-        block_name = kwargs.get('block_name', None)
+        print("更新通达信板块数据")
+        block_name = kwargs.get('block_code', None)
         stock_list = kwargs.get('stock_list', None)
         #此处可添加更新板块数据的逻辑，如调用Tushare接口获取最新板块信息等
         tq.clear_sector(block_name)
         tq.send_user_block(block_name, stock_list, show=True)
-
         
 @FeedManager.init('tushare')
 class TushareFeed(FeedBase):

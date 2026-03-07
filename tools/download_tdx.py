@@ -1,9 +1,11 @@
 import argparse
 import itertools
+import numpy as np
 import psutil
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import talib as ta
 
 from enum import IntEnum
 from datetime import datetime, timedelta
@@ -21,6 +23,11 @@ EXCHANGE = ['sh', 'sz', 'bj']
 
 SECTOR_PATH = 'E:\\datas\\tdx\\sector'
 
+SLOPE_THRESHOLD = 0.015
+SLOPE_WINDOWS= 5
+SHORT = 5
+MID = 10
+LONG =20
 class DATAFRAME(IntEnum):
     DAY = 0
     MINUTE5 = 1
@@ -69,6 +76,49 @@ sector_type = {
     'l2' : 'SECTOR_L2',
     'l3' : 'SECTOR_L3'
 }
+
+def calc_ols(df, column='', method=''):
+    windows_len = SLOPE_WINDOWS
+    N = int(''.join(filter(str.isdigit, method)))
+    # 提取数据,并价格转换为对数值，对数体现价格的等比变化程序
+    df[method] = ta.SMA(df[column].values.astype('float64'), timeperiod=N)
+    y = np.log(df[method].values)
+    n_rows = len(y)   
+    k_array = np.full(n_rows, np.nan)
+    x = np.arange(windows_len)
+    x_mean = np.mean(x)
+    sum_x2_minus_mean = np.sum((x - x_mean)**2) # 对应公式的分母
+    
+    # 只有当索引大于等于 N + (N-1) 时，才有足够的数据计算
+    start_idx = N + windows_len - 1 
+    
+    # 使用 NumPy 的滑动窗口视图提高效率
+    from numpy.lib.stride_tricks import sliding_window_view
+    
+    if n_rows >= start_idx:
+        windows = sliding_window_view(y, window_shape=windows_len)
+        # 计算斜率 k: sum((x - x_mean) * (y - y_mean)) / sum((x - x_mean)^2)
+        x_centered = x - x_mean
+        k_values = np.dot(windows, x_centered) / sum_x2_minus_mean    
+        k_array[windows_len-1:] = k_values
+    # 赋值给 DataFrame
+    column_name = f"{method}_slope"
+    df[column_name] = k_array*10
+  
+    return df
+
+def prepare_date(df=None):
+    method = 'sma'
+    method_short = f'{method}{SHORT}'
+    method_mid = f'{method}{MID}'
+    method_long = f'{method}{LONG}'
+
+    df['ohlc'] = df.eval('(high + 2*open + 2*close + low) / 6')
+    calc_ols(df=df, column='ohlc', method=method_short)                
+    calc_ols(df=df, column='ohlc', method=method_mid)
+    calc_ols(df=df, column='ohlc', method=method_long)
+
+    return df
 
 def save_csvfile(path=None, data=None, period=None):
     datefmt = date_fmt[period]
@@ -136,7 +186,9 @@ def download_stock():
         results = p.imap_unordered(read_tdx_files, task_filelist, chunksize=200)
         for i, res in enumerate(results):
             if res is not None:
+                res = prepare_date(res)
                 pb_data.append(res)
+
             print(f"已处理: {i+1}/{len(task_filelist)}...", end='\r')
 
     #将pb_data写入Parquet
@@ -162,17 +214,18 @@ def download_sector_list(datafeed=None, listfile=None, sector=None):
             downloadsignal = True
 
     if downloadsignal:
-        concept_list_df = datafeed.get_sector_list(sector_type=sector_type[sector])
-        concept_list_df.to_csv(listfile, index=False, encoding='utf-8-sig')
+        sector_list_df = datafeed.get_sector_list(sector_type=sector_type[sector])
+        sector_list_df.to_csv(listfile, index=False, encoding='utf-8-sig')
 
 def download_sector_daily(datafeed=None, listfile=None, sector=None):
     #每天更新概念板块指数
     assert listfile.exists(), f"Error: '{listfile}'"
-    concept_list_df = pd.read_csv(listfile, skiprows=1, header=None)
+    sector_list_df = pd.read_csv(listfile, skiprows=1, header=None)
     end_date = '' #到今天为止
     start_date = '20200101'
+    sector_daily = []
 
-    for _, sector_code in concept_list_df.iterrows():
+    for _, sector_code in sector_list_df.iterrows():
         symbol = f"{sector_code[0]}"
         dstfile = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}.csv"
 
@@ -190,7 +243,10 @@ def download_sector_daily(datafeed=None, listfile=None, sector=None):
 
         if new_pbrows is not None:
             new_pbrows['symbol'] = symbol
-            return new_pbrows
+            new_pbrows = prepare_date(new_pbrows)
+            sector_daily.append(new_pbrows)
+    
+    return sector_daily
 
 def update_sector_daily():
     #每天上传到通达信板块指数内
@@ -206,15 +262,15 @@ def download_sector(sectorlist=[]):
         sectorfile = Path(SECTOR_PATH)/sector/f"{sector}_list.csv"
         download_sector_list(datafeed=feed, listfile=sectorfile, sector=sector)
         res = download_sector_daily(datafeed=feed, listfile=sectorfile, sector=sector)
-        if res is not None:
-            pb_data.append(res)
+        if len(res) > 0:
+            pb_data += res
 
     if pb_data:
         final_df = pd.concat(pb_data, ignore_index=True)
         for col, dtype in stock_csvtype.items():
             final_df[col] = final_df[col].astype(dtype)
         
-        pb_path = Path(SECTOR_PATH) /'all_sector_daily.parquet'
+        pb_path = Path(SECTOR_PATH) /'all_sector_dailys.parquet'
         table = pa.Table.from_pandas(final_df)
         
         with pq.ParquetWriter(pb_path, table.schema, compression='snappy') as writer:

@@ -50,8 +50,19 @@ def data_to_df(data):
 #初始化
 tq.initialize(__file__)
 
+# 测试自定义板块相关
+#user_list = tq.get_user_sector()
+#print(f"self_sector,totla({len(user_list)}):{'\n'} {user_list}")
+
+
+
 #1.基础配置
-batch_codes = tq.get_stock_list_in_sector('通达信88',list_type = 1) #目标板块
+block_stocks = tq.get_stock_list_in_sector(block_code='881096.SH',list_type=1) #目标板块
+print(f"total-{len(block_stocks)}: {block_stocks}")
+pass
+
+
+'''
 start_time = '20200101' #数据起始时间
 target_end = '' #datetime.now().strftime('%Y%m%d') #数据结束时间
 target_gain = 5.0
@@ -126,3 +137,4 @@ else:
         print(f"清空自定义板块失败: {e}")
     print("-" * 50)
 
+'''
