@@ -3,54 +3,61 @@ import pandas as pd
 import vectorbt as vbt
 import itertools
 import gc
+from numba import njit, prange
 
-# 定义支持全参数寻优的工厂类
-BreakoutMonitor = vbt.IndicatorFactory(
-    class_name="BreakoutMonitor",
-    short_name="bkout",
-    input_names=["ohlc", "close", "volume", "s_ma", "m_ma", "l_ma"], 
-    param_names=["cv_w", "ct", "vg"], # cv_w:收敛窗口, ct:收敛阈值, vg:量能倍数
-    output_names=["entry", "exit"]
-).from_apply_func(
-    lambda ohlc, close, volume, s_ma, m_ma, l_ma, cv_w, ct, vg: 
-    apply_breakout_logic_full(ohlc, close, volume, s_ma, m_ma, l_ma, cv_w, ct, vg),
-    cv_w=5, ct=0.03, vg=1.5
-)
+@njit(parallel=True, fastmath=True)
+def breakout_strategy(ohlc, close, volume, s_ma, m_ma, l_ma, cv_w, ct, vg, n_symbols):
+    n_time, n_total_cols = s_ma.shape
+    entries = np.zeros((n_time, n_total_cols), dtype=np.bool_)
+    exits = np.zeros((n_time, n_total_cols), dtype=np.bool_)
 
-def apply_breakout_logic_full(ohlc, close, volume, s_ma, m_ma, l_ma, cv_w, ct, vg):
-    # 1. 均线收敛度 CV
-    ma_stack = np.stack([s_ma, m_ma, l_ma], axis=0)
-    cv = np.std(ma_stack, axis=0) / (np.mean(ma_stack, axis=0) + 1e-6)
-    
-    # 使用动态窗口 cv_w 计算滚动均线
-    # 注意：在 vbt.from_apply_func 中，如果 cv_w 是参数序列，需确保 nb 函数处理正确
-    # 这里我们使用高性能的 rolling_mean_nb
-    avg_conv = vbt.generic.nb.rolling_mean_nb(cv, int(cv_w)) 
-    # 条件 1：3天前的收敛度符合阈值 (使用 np.roll 模拟 shift(3))
-    is_converged = np.roll(avg_conv < ct, 3, axis=0) 
+    # 1. 预计算成交量 Sum (针对 n_symbols)
+    # 增加一个保护：如果 i < 5，则计算能拿到的所有均值
+    vol_sum_all = np.zeros((n_time, n_symbols), dtype=np.float32)
+    for s in prange(n_symbols):
+        running_vol = 0.0
+        for t in range(n_time):
+            running_vol += volume[t, s]
+            if t >= 5:
+                running_vol -= volume[t-5, s]
+            vol_sum_all[t, s] = running_vol
 
-    # 2. 价格突破逻辑 (基于 close/ohlc 价格，二选一)
-    oc = ohlc
-    # 3天整体涨幅判定
-    total_3d_gain = (oc / (np.roll(oc, 3, axis=0) + 1e-6)) - 1
-    
-    # 3日连续走势判定
-    pct_chg = (oc - np.roll(oc, 1, axis=0)) / (np.roll(oc, 1, axis=0) + 1e-6)
-    all_pos = vbt.generic.nb.rolling_min_nb(pct_chg, 3) > 0
-    has_big_win = vbt.generic.nb.rolling_max_nb(pct_chg, 3) > 0.04
-       
-    
-    # 3. 量能点火
-    v_ma10 = vbt.generic.nb.rolling_mean_nb(volume, 10)
-    v_avg3 = vbt.generic.nb.rolling_mean_nb(volume, 3)
-    volume_ignited = v_avg3 > (v_ma10 * vg)
+    for col in prange(n_total_cols):
+        base_col = col % n_symbols
+        c_w = int(cv_w[col])
+        c_t = ct[col]
+        c_v_g = vg[col]
+        
+        # --- 核心改进：起始索引最小化 ---
+        # 只需要确保 i 能够往回数 c_w 天即可 (用于计算收敛窗口)
+        # 即使 c_w=6，我们也只跳过前 6 天，而不是 40 天
+        start_idx = c_w 
 
-    # 4. 趋势确认 (价格在慢线之上)
-    buy_signal = is_converged & (total_3d_gain > 0.10) & all_pos & \
-                 has_big_win & volume_ignited & (close > l_ma)
-    
-    # 填充开头的 NaN 滚动产生的 False Positive
-    buy_signal[:20, :] = False 
-    sell_signal = close < l_ma
-    
-    return buy_signal, sell_signal
+        for i in range(start_idx, n_time):
+            # A. 平仓逻辑 (由于 MA 已预热，第 0 天起即可判断)
+            if close[i, base_col] < l_ma[i, col]:
+                exits[i, col] = True
+
+            # B. 入场逻辑
+            # 1. 趋势过滤 (MA 在切片第一天就是准的)
+            if not (s_ma[i, col] > m_ma[i, col] > l_ma[i, col]):
+                continue
+
+            # 2. 爆量过滤 (需要 5 日数据支撑)
+            # 如果 i < 5，则跳过或改用更短的均值，这里建议 i >= 5 开启
+            if i < 5 or not (volume[i, base_col] > (vol_sum_all[i-1, base_col] / 5.0 * c_v_g)):
+                continue
+
+            # 3. 收敛压缩判断
+            max_p = -1.0
+            min_p = 1e10
+            for k in range(i - c_w, i):
+                p = ohlc[k, base_col]
+                if p > max_p: max_p = p
+                if p < min_p: min_p = p
+            
+            if ohlc[i, base_col] > max_p:
+                if (max_p - min_p) / min_p <= c_t:
+                    entries[i, col] = True
+                
+    return entries, exits

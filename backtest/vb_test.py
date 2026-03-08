@@ -1,18 +1,20 @@
 import ast
-import vectorbt as vbt
 import pandas as pd
 import numpy as np
 import itertools
 import re
-from pathlib import Path
-from dateutil.relativedelta import relativedelta
-import gc
-from . import sectorpick
-from .util.breakout import BreakoutMonitor
 import seaborn as sns
 import matplotlib.pyplot as plt
+import gc
+import vectorbt as vbt
+from pathlib import Path
+from dateutil.relativedelta import relativedelta
+from . import sectorpick
+from .util.breakout import BreakoutMonitor, apply_func_wrapper
+from api.timeprofile import TimeProfile
 
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test.csv'
+STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist.csv'
+RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\vb_test_out.csv'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
 ENDDATE = '2025-12-26'
@@ -118,7 +120,55 @@ def get_stock_inlist(df=None, stocklist=None):
     partstocks = df[df['symbol'].isin(target_tickers)]
     return partstocks
 
+def get_batch_trade_details(pf, symbol_names, combo_params, window_id, start_str, end_str):
+    """
+    针对当前 vbt 版本的字段名提取交易细节
+    """
+    # 1. 获取 readable 记录
+    trades_df = pf.trades.records_readable.copy()
+    if trades_df.empty:
+        return pd.DataFrame()
 
+    num_symbols = len(symbol_names)
+    
+    # 2. 映射 Symbol 和 参数 (针对 'Column' 字段)
+    def map_info(col_idx):
+        p_idx = int(col_idx // num_symbols)
+        s_idx = int(col_idx % num_symbols)
+        s_name = symbol_names[s_idx] if s_idx < len(symbol_names) else "Unknown"
+        p_val = combo_params[p_idx] if p_idx < len(combo_params) else "Unknown"
+        return s_name, p_val
+
+    # 这里的 'Column' 对应你列表里的第二个字段
+    mapped_data = trades_df['Column'].apply(map_info)
+    trades_df['Symbol'] = [x[0] for x in mapped_data]
+    trades_df['Params'] = [str(x[1]) for x in mapped_data]
+    
+    # 3. 时间映射：将索引 (131, 141) 转换为真实日期
+    # 注意：使用 pf.wrapper.index 进行定位
+    trades_df['Entry Date'] = pf.wrapper.index[trades_df['Entry Timestamp']]
+    trades_df['Exit Date'] = pf.wrapper.index[trades_df['Exit Timestamp']]
+    
+    # 4. 添加窗口信息
+    trades_df['Window_ID'] = window_id
+    trades_df['Window_Range'] = f"{start_str}_{end_str}"
+
+    # 5. 统一列名映射，对标你的字段名
+    final_cols = {
+        'Avg Entry Price': 'Entry Price',
+        'Avg Exit Price': 'Exit Price',
+        'PnL': 'PnL',
+        'Return': 'Return',
+        'Size': 'Size'
+    }
+    trades_df = trades_df.rename(columns=final_cols)
+
+    # 6. 返回核心列
+    return trades_df[[
+        'Window_ID', 'Window_Range', 'Symbol', 'Params', 
+        'Entry Date', 'Exit Date', 'Entry Price', 'Exit Price', 
+        'Size', 'PnL', 'Return'
+    ]]
 
 # 4. 定义评分函数 (复用你之前的多维度逻辑)
 def get_score(pf):
@@ -167,33 +217,7 @@ def get_score(pf):
         'final_value': final_value,
         'exposure': exposure
     })
-    '''
-    # 年化收益
-    ann_ret = pf.annualized_return()
-    # 夏普
-    sharpe = pf.sharpe_ratio()
-    # 胜率
-    win_rate = pf.trades.win_rate()
-    # 最大回撤
-    max_dd = pf.max_drawdown()
-    # 持仓占比 (Exposure)
-    exposure = (pf.assets_value().sum(axis=1) / pf.value()).mean()
-    # 期末资产
-    final_value = pf.value().iloc[-1]
-    # 综合得分 (示例：收益 * 胜率 / (回撤 + 0.01))
-    score = (ann_ret * win_rate) / (max_dd + 0.01)
-
-    return pd.DataFrame({
-        'score': score,
-        'ann_ret': ann_ret,
-        'sharpe': sharpe,
-        'win_rate': win_rate,
-        'max_dd': max_dd,
-        'exposure': exposure,
-        'final_value': final_value,
-        'dd_dur': pf.stats()['Max Drawdown Duration'].days if 'Max Drawdown Duration' in pf.stats() else 0
-    })
-    '''
+    
 def generate_time_chunks(start_date, end_date, split_window, roll_step):
     current_start = start_date
     chunks = []
@@ -268,7 +292,10 @@ def get_robustness_report(all_window_data, param_names):
     robust_df['final_robust_rank'] = robust_df['stability_sharpe'] * robust_df['profitable_slice_pct']
     
     return robust_df.sort_values(by='final_robust_rank', ascending=False)
-    
+
+def to_f32_np(df):
+    return np.ascontiguousarray(df.values, dtype=np.float32)
+
 if __name__ == '__main__':
     # 1. 准备数据 (建议替换为你的 TDX 数据)
     TICKERS_DF = pd.read_csv(STOCKLIST_PATH, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式
@@ -310,108 +337,110 @@ if __name__ == '__main__':
 
     # 5. 循环窗口执行寻优
     window_results = []
+    all_trade_details = []
     param_names = ['cv_w', 'ct', 'vg', 'short', 'mid', 'long']
     for i, (s_dt, e_dt) in enumerate(time_chunks):
-        s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
-        # 局部时间切片 (宽表)
-        w_close = stocks_part_dict['close'].loc[s_str:e_str]
-        w_ohlc = stocks_part_dict['ohlc'].loc[s_str:e_str]
-        w_vol = stocks_part_dict['volume'].loc[s_str:e_str]
+        with TimeProfile():
+            s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
+            # 局部时间切片 (宽表)
+            w_close = stocks_part_dict['close'].loc[s_str:e_str]
+            w_ohlc = stocks_part_dict['ohlc'].loc[s_str:e_str]
+            w_vol = stocks_part_dict['volume'].loc[s_str:e_str]
 
-        if len(w_close) < 100:
-            continue
-        
-        print(f"🔄 正在处理切片 {i+1}: {s_dt.strftime('%Y%m%d')} -> {e_dt.strftime('%Y%m%d')} ({len(w_close)} 行)")
-        window_scores = []
-        for combo_batch in chunked_iterable(all_combos, len(long_space)*len(short_space)*len(mid_space)):
-            #参数切片
-            cw_w = [c[0] for c in combo_batch]
-            ct_w = [c[1] for c in combo_batch]
-            vg_w = [c[2] for c in combo_batch]
-            short_w = [c[3] for c in combo_batch]
-            mid_w = [c[4] for c in combo_batch]
-            long_w = [c[5] for c in combo_batch]
+            if len(w_close) < 100:
+                continue
             
-            batch_s_ma = [ma_cache[w].loc[s_str:e_str] for w in short_w]
-            batch_m_ma = [ma_cache[w].loc[s_str:e_str] for w in mid_w]
-            batch_l_ma = [ma_cache[w].loc[s_str:e_str] for w in long_w]
-            num_combos = len(batch_s_ma)
-            num_symbols = w_close.shape[1]
-
+            print(f"🔄 正在处理切片 {i+1}: {s_dt.strftime('%Y%m%d')} -> {e_dt.strftime('%Y%m%d')} ({len(w_close)} 行)")
+            window_scores = []
+            #batch_size保持在10~15之间，可以在内存和运行速度之间平衡
+            batch_size = len(short_space)*len(long_space)
+            for combo_batch in chunked_iterable(all_combos, batch_size):
+                #参数切片
+                cw_w = [c[0] for c in combo_batch]
+                ct_w = [c[1] for c in combo_batch]
+                vg_w = [c[2] for c in combo_batch]
+                short_w = [c[3] for c in combo_batch]
+                mid_w = [c[4] for c in combo_batch]
+                long_w = [c[5] for c in combo_batch]
+                
+                batch_s_ma = [ma_cache[w].loc[s_str:e_str] for w in short_w]
+                batch_m_ma = [ma_cache[w].loc[s_str:e_str] for w in mid_w]
+                batch_l_ma = [ma_cache[w].loc[s_str:e_str] for w in long_w]
+                
+                num_symbols = w_close.shape[1]
             
-            # 直接传入batch_s_ma，因是列表，导致run()广播报错，传入与w_close对齐的 MA 宽表列表
-            s_ma_wide = pd.concat(batch_s_ma, axis=1, keys=range(num_combos))
-            m_ma_wide = pd.concat(batch_m_ma, axis=1, keys=range(num_combos))
-            l_ma_wide = pd.concat(batch_l_ma, axis=1, keys=range(num_combos))
-            # 运行自定义指标
-            ind = BreakoutMonitor.run(
-                w_ohlc, 
-                w_close, 
-                w_vol,
-                s_ma_wide, 
-                m_ma_wide, 
-                l_ma_wide,
-                cv_w=cw_w, ct=ct_w, vg=vg_w,
-                param_product=False # 参数已一一对应
-            )
-            # 信号诊断 (仅对每片首个 Batch 采样)
-            if len(window_scores) == 0:
-                first_combo_entries = ind.entry.iloc[:, :num_symbols]
-                daily_hits = first_combo_entries.sum(axis=1) # 提取第一组参数 (id=0) 的所有股票信号并求和
-                print(f"   [信号诊断] 首组参数日均信号: {daily_hits.mean():.2f} | 峰值: {daily_hits.max()}")
+                # np.tile 将矩阵按行 1 倍、按列 n_params 倍进行复制
+                ohlc_tile = to_f32_np(w_ohlc)
+                close_tile = to_f32_np(w_close)
+                vol_tile = to_f32_np(w_vol)
+                s_ma_tile = to_f32_np(pd.concat(batch_s_ma, axis=1))
+                m_ma_tile = to_f32_np(pd.concat(batch_m_ma, axis=1))
+                l_ma_tile = to_f32_np(pd.concat(batch_l_ma, axis=1))
+                
+                cw_w_expanded = np.repeat(np.array(cw_w), num_symbols)
+                ct_w_expanded = np.repeat(np.array(ct_w), num_symbols)
+                vg_w_expanded = np.repeat(np.array(vg_w), num_symbols)
 
-            entries = ind.entry
-            # exit 逻辑：价格跌破对应的参数化长线均线
-            exits = ind.exit
-            columns = entries.columns
-            raw_group_labels = [str(val[:-1]) for val in columns.values]
-            sorted_indices = np.argsort(raw_group_labels)
-            entries_sorted = entries.iloc[:, sorted_indices]
-            exits_sorted = exits.iloc[:, sorted_indices]
-            # 同步排序标签
-            group_labels_sorted = [raw_group_labels[i] for i in sorted_indices]
-            # 运行组合回测
-            pf = vbt.Portfolio.from_signals(
-                close=w_close,
-                entries=entries_sorted,
-                exits=exits_sorted, 
-                size=0.02, # 单次开仓2%
-                size_type='Percent',
-                cash_sharing=True,
-                call_seq='random',
-                fees=0.002,
-                slippage=0.001,
-                freq='D',
-                init_cash=1000000,
-                sl_stop=0.15,          # 15% 固定止损
-                group_by=group_labels_sorted # 按参数组合分组计算
-            )
+                # 运行自定义指标
+                entries_np, exits_np = apply_func_wrapper(
+                    ohlc_tile, close_tile, vol_tile,
+                    s_ma_tile, m_ma_tile, l_ma_tile,
+                    cw_w_expanded, ct_w_expanded, vg_w_expanded,
+                    n_symbols = num_symbols
+                )
+
+                # 信号诊断 (仅对每片首个 Batch 采样)
+                if len(window_scores) == 0:
+                    first_combo_entries = entries_np[:, :num_symbols]
+                    daily_hits = first_combo_entries.sum(axis=1) # 提取第一组参数 (id=0) 的所有股票信号并求和
+                    print(f" [信号诊断] 首组参数日均信号: {daily_hits.mean():.2f} | 峰值: {daily_hits.max()}")
+
+
+                group_by_ids = np.repeat(np.arange(len(combo_batch)), num_symbols)
+
+                # 运行组合回测
+                pf = vbt.Portfolio.from_signals(
+                    close = np.tile(close_tile, (1, len(combo_batch))),
+                    entries=entries_np,
+                    exits=exits_np, 
+                    size=0.02, # 单次开仓2%
+                    size_type='percent',
+                    cash_sharing=True,
+                    #call_seq='random',
+                    fees=0.002,
+                    slippage=0.001,
+                    freq='D',
+                    init_cash=1000000,
+                    sl_stop=0.15,          # 15% 固定止损
+                    group_by=group_by_ids, # 按参数组合分组计算
+                )
+                
+                # 收集多维度指标 
+                batch_score = get_score(pf)
+                batch_score.index = pd.MultiIndex.from_tuples(
+                    [combo_batch[i] for i in batch_score.index], 
+                    names=param_names
+                )
+                window_scores.append(batch_score)
+                batch_trades = get_batch_trade_details(pf, stocklist, combo_batch, i+1, s_str, e_str)
+                if not batch_trades.empty:
+                    all_trade_details.append(batch_trades)
+
+                
+                #显示清理内存
+                del pf, batch_s_ma, batch_m_ma, batch_l_ma, cw_w_expanded,ct_w_expanded,vg_w_expanded,entries_np,exits_np
+                del ohlc_tile, close_tile, vol_tile, s_ma_tile, m_ma_tile, l_ma_tile
+                gc.collect()
+
+            if (end_dt - e_dt).days < 30: break
             
-            # 收集多维度指标 
-            batch_score = get_score(pf)
-            id_map = {str(i): combo for i, combo in enumerate(combo_batch)}
-            real_tuples = []
-            for idx_str in batch_score.index:
-                # 使用正则提取括号中最后一个数字，例如从 '(4, 0.025, 1.5, 1)' 中提取 '1'
-                match = re.search(r'(\d+)\s*\)$', str(idx_str))
-                num_id = match.group(1)
-                real_tuples.append(id_map[num_id])
-  
-            batch_score.index = pd.MultiIndex.from_tuples(real_tuples, names=param_names)
-            window_scores.append(batch_score)
-
+            # 汇总当前窗口所有批次，并存入总列表
+            if window_scores:
+                window_df = pd.concat(window_scores)
+                print(f"   ✅ 切片处理完成。当前切片最高分: {window_df['score'].max():.4f}, 平均夏普: {window_df['sharpe'].mean():.4f}")
+                window_results.append(window_df)
             
-            #显示清理内存
-            del pf, s_ma_wide, m_ma_wide, l_ma_wide, ind
-            gc.collect()
-
-        if (end_dt - e_dt).days < 30: break
-        
-        # 汇总当前窗口所有批次，并存入总列表
-        if window_scores:
-            window_df = pd.concat(window_scores)
-            print(f"   ✅ 切片处理完成。当前切片最高分: {window_df['score'].max():.4f}, 平均夏普: {window_df['sharpe'].mean():.4f}")
-            window_results.append(window_df)
+            
 
 
     # 6. 最终聚合：选出在所有时间窗口表现最稳的参数
@@ -453,3 +482,8 @@ if __name__ == '__main__':
 
         best_p = top_3.index[0]
         print(f"\n🌟 推荐最优组合: CV={best_p[0]}, CT={best_p[1]}, VG={best_p[2]}, MA_Set=({best_p[3]},{best_p[4]},{best_p[5]})")
+
+    if all_trade_details:
+        final_trade_report = pd.concat(all_trade_details, ignore_index=True)
+        final_trade_report.to_csv(RESULT_PATH, index=False, encoding='utf-8-sig', float_format='%.2f')
+        print(f"🚀 全时段交易报告已生成！总计 {len(final_trade_report)} 笔交易。")
