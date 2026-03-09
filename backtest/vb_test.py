@@ -10,11 +10,11 @@ import vectorbt as vbt
 from pathlib import Path
 from dateutil.relativedelta import relativedelta
 from . import sectorpick
-from .util.breakout import BreakoutMonitor, apply_func_wrapper
+from .util.breakout import breakout_strategy
 from api.timeprofile import TimeProfile
 
 STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist.csv'
-RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\vb_test_out.csv'
+RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
 ENDDATE = '2025-12-26'
@@ -173,49 +173,40 @@ def get_batch_trade_details(pf, symbol_names, combo_params, window_id, start_str
 # 4. 定义评分函数 (复用你之前的多维度逻辑)
 def get_score(pf):
     # 1. 基础指标提取
-    ann_ret = pf.annualized_return().fillna(-0.99)
-    # 彻底清理年化收益中的 inf
-    ann_ret = ann_ret.replace([np.inf, -np.inf], 2.0).clip(lower=-0.99, upper=2.0)
+    ann_ret = pf.annualized_return()
+    ann_ret = ann_ret.replace([np.inf, -np.inf], 2.0).fillna(-0.99).clip(-0.99, 2.0)
 
     max_dd = pf.max_drawdown().abs().replace(0, 0.01).fillna(1.0)
     
     # 2. 核心修正：夏普率防爆处理
-    sharpe = pf.sharpe_ratio()
-    # 先处理 NaN，再处理 inf，最后限制在一个合理区间（如 -5 到 5）
-    sharpe = sharpe.replace([np.inf, -np.inf], np.nan).fillna(0)
-    sharpe = sharpe.clip(lower=-5.0, upper=5.0)
+    sharpe = pf.sharpe_ratio().replace([np.inf, -np.inf], np.nan).fillna(0).clip(-5.0, 5.0)
     
     # 3. 其他指标
-    counts = pf.trades.count()
+
     win_rate = pf.trades.win_rate().fillna(0)
 
     
     duration_series = pf.drawdowns.max_duration()
     dd_dur_days = duration_series.dt.days.fillna(0).astype(np.float32)
-    dd_score = (1 - (dd_dur_days / 252.0)).clip(lower=0, upper=1)
+    dd_score = (1 - (dd_dur_days / 252.0)).clip(0, 1)
 
     calmar = ann_ret / max_dd
     # 获取期末总资产（100万变成了多少）
-    final_value = pf.value().iloc[-1]
+    final_value = pf.final_value()
     
     # 获取平均持仓比例（诊断资金是否一直在睡觉）
-    exposure = pf.asset_value().sum(axis=1).mean() / pf.value().mean()
     # 4. 计算得分
     score = (0.4 * calmar) + (0.2 * dd_score) + (0.2 * sharpe) + (0.2 * win_rate)
-    
-    # 5. 诊断：如果依然出现 inf，打印出来
-    if np.isinf(score).any():
-        print(f"⚠️ 警告：检测到 inf 得分！交易笔数均值: {counts.mean():.2f}")
+
 
     return pd.DataFrame({
-        'score': score,
-        'ann_ret': ann_ret,
-        'max_dd': max_dd,
-        'sharpe': sharpe,
-        'win_rate': win_rate,
-        'dd_dur': dd_dur_days,
-        'final_value': final_value,
-        'exposure': exposure
+        'score': score.astype(np.float32),
+        'ann_ret': ann_ret.astype(np.float32),
+        'max_dd': max_dd.astype(np.float32),
+        'sharpe': sharpe.astype(np.float32),
+        'win_rate': win_rate.astype(np.float32),
+        'dd_dur': dd_dur_days.astype(np.float32),
+        'final_value': final_value.astype(np.float32)
     })
     
 def generate_time_chunks(start_date, end_date, split_window, roll_step):
@@ -339,6 +330,7 @@ if __name__ == '__main__':
     window_results = []
     all_trade_details = []
     param_names = ['cv_w', 'ct', 'vg', 'short', 'mid', 'long']
+    idx = 0
     for i, (s_dt, e_dt) in enumerate(time_chunks):
         with TimeProfile():
             s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
@@ -355,6 +347,7 @@ if __name__ == '__main__':
             #batch_size保持在10~15之间，可以在内存和运行速度之间平衡
             batch_size = len(short_space)*len(long_space)
             for combo_batch in chunked_iterable(all_combos, batch_size):
+                idx += 1
                 #参数切片
                 cw_w = [c[0] for c in combo_batch]
                 ct_w = [c[1] for c in combo_batch]
@@ -382,7 +375,7 @@ if __name__ == '__main__':
                 vg_w_expanded = np.repeat(np.array(vg_w), num_symbols)
 
                 # 运行自定义指标
-                entries_np, exits_np = apply_func_wrapper(
+                entries_np, exits_np = breakout_strategy(
                     ohlc_tile, close_tile, vol_tile,
                     s_ma_tile, m_ma_tile, l_ma_tile,
                     cw_w_expanded, ct_w_expanded, vg_w_expanded,
@@ -403,14 +396,14 @@ if __name__ == '__main__':
                     close = np.tile(close_tile, (1, len(combo_batch))),
                     entries=entries_np,
                     exits=exits_np, 
-                    size=0.02, # 单次开仓2%
+                    size=0.01, # 单次开仓2%
                     size_type='percent',
                     cash_sharing=True,
                     #call_seq='random',
                     fees=0.002,
                     slippage=0.001,
                     freq='D',
-                    init_cash=1000000,
+                    init_cash=10000000,
                     sl_stop=0.15,          # 15% 固定止损
                     group_by=group_by_ids, # 按参数组合分组计算
                 )
@@ -424,7 +417,9 @@ if __name__ == '__main__':
                 window_scores.append(batch_score)
                 batch_trades = get_batch_trade_details(pf, stocklist, combo_batch, i+1, s_str, e_str)
                 if not batch_trades.empty:
-                    all_trade_details.append(batch_trades)
+                    f_path = Path(RESULT_PATH)/f"vb_test_out_{idx}.csv"
+                    batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')
+                    del batch_trades
 
                 
                 #显示清理内存
@@ -477,13 +472,14 @@ if __name__ == '__main__':
             print(f" 收益表现: 年化收益={row['ann_ret']*100:.2f}% | 卡玛比率={row['calmar_avg']:.2f} | 夏普={row['sharpe']:.2f}")
             print(f" 交易质量: 胜率={row['win_rate']*100:.2f}%")
             print(f" 风险控制: 最大回撤={row['max_dd']*100:.2f}% | 平均最大回撤持续={int(row['dd_dur'])}天")
-            print(f" 资金占用: 期末资产={row['final_value']:.2f} | 持仓占比={row['exposure']:.2f}")
+            #print(f" 资金占用: 期末资产={row['final_value']:.2f} | 持仓占比={row['exposure']:.2f}")
+            print(f" 资金占用: 期末资产={row['final_value']:.2f}")
             print("-" * 60)
 
         best_p = top_3.index[0]
         print(f"\n🌟 推荐最优组合: CV={best_p[0]}, CT={best_p[1]}, VG={best_p[2]}, MA_Set=({best_p[3]},{best_p[4]},{best_p[5]})")
 
-    if all_trade_details:
-        final_trade_report = pd.concat(all_trade_details, ignore_index=True)
-        final_trade_report.to_csv(RESULT_PATH, index=False, encoding='utf-8-sig', float_format='%.2f')
-        print(f"🚀 全时段交易报告已生成！总计 {len(final_trade_report)} 笔交易。")
+   # if all_trade_details:
+    #    final_trade_report = pd.concat(all_trade_details, ignore_index=True)
+   #     final_trade_report.to_csv(RESULT_PATH, index=False, encoding='utf-8-sig', float_format='%.2f')
+   #     print(f"🚀 全时段交易报告已生成！总计 {len(final_trade_report)} 笔交易。")
