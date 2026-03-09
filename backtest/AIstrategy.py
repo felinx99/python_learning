@@ -10,6 +10,7 @@ from .util import datafeed
 from . import sectorpick
 
 RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\tmp'
+STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test.csv'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 START_DATE = '20251024' 
 END_DATE = '20260106' 
@@ -709,7 +710,7 @@ class TrendStrategyTerm:
             print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
-    def daily_monitor_breakout(self, stocklist_df=None, converged_windwos=5, converged_threshold=0.03, vol_gain=1.5):        
+    def daily_monitor_breakout(self, stocklist_df=None, converged_windwos=6, converged_threshold=2.5, vol_gain=2.2):        
         # A. 监测潜力池 (入场信号)
         try:
             signal_list = []
@@ -733,11 +734,11 @@ class TrendStrategyTerm:
 
                 # 计算收敛度 (变异系数 CV)
                 ma_cols = ['sma5', 'sma10', 'sma20']
-                df['converged'] = df[ma_cols].std(axis=1) / df[ma_cols].mean(axis=1)
+                df['converged'] = df[ma_cols].std(axis=1) / df[ma_cols].mean(axis=1) * 100
 
                 # --- 条件 1：3天前的一周均线靠近收敛 ---
                 # 取从第-8天到第-4天（即3天前的一周）的收敛度均值
-                df['avg_convergence'] = df['converged'].rolling(window=converged_windwos).mean().shift(3)
+                df['avg_convergence'] = df['converged'].rolling(window=converged_windwos).mean().shift(2)
                 #print(f'{index} avg_convergence:{avg_convergence}')
                 df['is_converged'] = (df['avg_convergence'] < converged_threshold).fillna(False)  # 阈值可调，0.03代表间距在3%以内
 

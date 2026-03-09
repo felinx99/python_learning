@@ -4,6 +4,7 @@ import numpy as np
 import itertools
 import re
 import seaborn as sns
+import talib as ta
 import matplotlib.pyplot as plt
 import gc
 import vectorbt as vbt
@@ -13,7 +14,7 @@ from . import sectorpick
 from .util.breakout import breakout_strategy
 from api.timeprofile import TimeProfile
 
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist.csv'
+STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test1.csv'
 RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
@@ -120,7 +121,7 @@ def get_stock_inlist(df=None, stocklist=None):
     partstocks = df[df['symbol'].isin(target_tickers)]
     return partstocks
 
-def get_batch_trade_details(pf, symbol_names, combo_params, window_id, start_str, end_str):
+def get_batch_trade_details(pf, symbol_names, combo_params, window_id, start_str, end_str, date_index):
     """
     针对当前 vbt 版本的字段名提取交易细节
     """
@@ -146,8 +147,8 @@ def get_batch_trade_details(pf, symbol_names, combo_params, window_id, start_str
     
     # 3. 时间映射：将索引 (131, 141) 转换为真实日期
     # 注意：使用 pf.wrapper.index 进行定位
-    trades_df['Entry Date'] = pf.wrapper.index[trades_df['Entry Timestamp']]
-    trades_df['Exit Date'] = pf.wrapper.index[trades_df['Exit Timestamp']]
+    trades_df['Entry Date'] = date_index[trades_df['Entry Timestamp']]
+    trades_df['Exit Date'] = date_index[trades_df['Exit Timestamp']]
     
     # 4. 添加窗口信息
     trades_df['Window_ID'] = window_id
@@ -169,6 +170,57 @@ def get_batch_trade_details(pf, symbol_names, combo_params, window_id, start_str
         'Entry Date', 'Exit Date', 'Entry Price', 'Exit Price', 
         'Size', 'PnL', 'Return'
     ]]
+
+def get_score_single(pf):
+    """
+    专为单参数测试设计：处理标量数据，逻辑简单透明
+    """
+    # 1. 提取标量指标 (Numpy float64)
+    ann_ret_raw = pf.annualized_return()
+    # 标量处理：使用原生 min/max 或 np.clip
+    ann_ret = np.clip(ann_ret_raw if np.isfinite(ann_ret_raw) else -0.99, -0.99, 2.0)
+
+    # 2. 最大回撤
+    max_dd_raw = abs(pf.max_drawdown())
+    max_dd = max_dd_raw if max_dd_raw > 0 else 0.01
+
+    # 3. 夏普率 (处理可能的 inf 或 nan)
+    sharpe_raw = pf.sharpe_ratio()
+    if not np.isfinite(sharpe_raw):
+        sharpe = 0.0
+    else:
+        sharpe = np.clip(sharpe_raw, -5.0, 5.0)
+
+    # 4. 胜率
+    win_rate = pf.trades.win_rate()
+    if np.isnan(win_rate): win_rate = 0.0
+
+    # 5. 回撤持续时间 (Timedelta 处理)
+    max_dur = pf.drawdowns.max_duration()
+    # 判断是否为 Timedelta 类型
+    if hasattr(max_dur, 'days'):
+        dd_dur_days = float(max_dur.days)
+    else:
+        dd_dur_days = float(max_dur)
+    
+    dd_score = np.clip(1.0 - (dd_dur_days / 252.0), 0.0, 1.0)
+
+    # 6. 计算最终得分
+    calmar = ann_ret / max_dd
+    final_value = pf.final_value()
+    
+    score = (0.4 * calmar) + (0.2 * dd_score) + (0.2 * sharpe) + (0.2 * win_rate)
+
+    # 7. 返回一个简单的字典或单行 DataFrame 方便查看
+    return {
+        'score': float(score),
+        'ann_ret': float(ann_ret),
+        'max_dd': float(max_dd),
+        'sharpe': float(sharpe),
+        'win_rate': float(win_rate),
+        'dd_dur': dd_dur_days,
+        'final_value': float(final_value)
+    }
 
 # 4. 定义评分函数 (复用你之前的多维度逻辑)
 def get_score(pf):
@@ -292,9 +344,11 @@ if __name__ == '__main__':
     TICKERS_DF = pd.read_csv(STOCKLIST_PATH, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式
     stocklist = list(TICKERS_DF.to_records(index=False))
     allstocks_data_df = load_all_stocks(stocklist)
-    need_cols = ['close', 'ohlc', 'volume']
-    stocks_part_dict = prepare_stocks(src_df=allstocks_data_df, values=need_cols)
-
+    allstocks_data_df['volume3'] = allstocks_data_df['volume'].rolling(window=3).mean()
+    allstocks_data_df['volume10'] = allstocks_data_df['volume'].rolling(window=10).mean()
+    allstocks_data_df['pct_chg'] = allstocks_data_df['ohlc'].pct_change()
+    need_cols = ['close', 'ohlc', 'volume3', 'volume10', 'pct_chg']
+    
     # 2. 数据切片，按指定的split,roll参数进行切片和滚动
     split_config = relativedelta(months=24)
     roll_config = relativedelta(months=6)
@@ -306,23 +360,42 @@ if __name__ == '__main__':
     time_chunks = generate_time_chunks(start_dt, end_dt, split_config, roll_config)
     
     # 3. 参数空间
+    #converged_window_space = [6]
+    #converged_threshold_space = [2.5]
+    #vol_gain_space = [2.2]
+    #short_space = [5]
+    #mid_space = [10]
+    #long_space = [20]
+
     converged_window_space = [4,5,6]
-    converged_threshold_space = [0.025, 0.03, 0.035]
+    converged_threshold_space = [2.5, 3, 3.5]
     vol_gain_space = [1.3, 1.5, 2, 2.2]
     short_space = (3,4,5,6,7)
-    mid_space = (8, 10, 12)
+    mid_space = (8, 10, 12, 14)
     long_space = (20,25,30,35,40)
 
 
     #预处理sma部分
-    all_sma_windows = sorted(list(short_space + mid_space + long_space))
-    ma_cache = {}
-    ref_columns = stocks_part_dict['close'].columns
+    all_sma_windows = sorted(short_space + mid_space + long_space)
     for w in all_sma_windows:
-        raw_ma = vbt.MA.run(stocks_part_dict['ohlc'], window=w).ma
-        if isinstance(raw_ma.columns, pd.MultiIndex):
-            raw_ma.columns = raw_ma.columns.get_level_values('symbol')
-        ma_cache[w] = raw_ma.reindex(columns=ref_columns).astype(np.float32)
+        sma_period = f"sma_{w}"
+        allstocks_data_df[sma_period] = allstocks_data_df['ohlc'].rolling(window=w).mean()
+    
+    sma_combos = list(itertools.product(short_space, mid_space, long_space)) 
+    for combo in sma_combos:
+        sma_short_columns = f"sma_{combo[0]}"
+        sma_mid_columns = f"sma_{combo[1]}"
+        sma_long_columns = f"sma_{combo[2]}"
+        ma_cols = [sma_short_columns, sma_mid_columns, sma_long_columns]
+        conv_comb_column=f"conv_{combo[0]}_{combo[1]}_{combo[2]}"
+        need_cols.append(conv_comb_column)
+        allstocks_data_df[conv_comb_column] = allstocks_data_df[ma_cols].std(axis=1) / allstocks_data_df[ma_cols].mean(axis=1) * 100
+    
+
+    stocks_part_dict = prepare_stocks(src_df=allstocks_data_df, values=need_cols)
+    ma_cache = {}
+    for w in all_sma_windows:
+        ma_cache[w] = vbt.MA.run(stocks_part_dict['ohlc'], window=w).ma.values.astype(np.float32)
 
     all_combos = list(itertools.product(converged_window_space,converged_threshold_space,vol_gain_space, short_space, mid_space, long_space))
 
@@ -330,14 +403,17 @@ if __name__ == '__main__':
     window_results = []
     all_trade_details = []
     param_names = ['cv_w', 'ct', 'vg', 'short', 'mid', 'long']
+    global_dates = stocks_part_dict['close'].index
     idx = 0
     for i, (s_dt, e_dt) in enumerate(time_chunks):
         with TimeProfile():
             s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
             # 局部时间切片 (宽表)
             w_close = stocks_part_dict['close'].loc[s_str:e_str]
-            w_ohlc = stocks_part_dict['ohlc'].loc[s_str:e_str]
-            w_vol = stocks_part_dict['volume'].loc[s_str:e_str]
+            #w_ohlc = stocks_part_dict['ohlc'].loc[s_str:e_str]
+            w_vol3 = stocks_part_dict['volume3'].loc[s_str:e_str]
+            w_vol10 = stocks_part_dict['volume10'].loc[s_str:e_str]
+            w_pct = stocks_part_dict['pct_chg'].loc[s_str:e_str]
 
             if len(w_close) < 100:
                 continue
@@ -346,40 +422,54 @@ if __name__ == '__main__':
             window_scores = []
             #batch_size保持在10~15之间，可以在内存和运行速度之间平衡
             batch_size = len(short_space)*len(long_space)
+            assert batch_size > 1, print("batch_size should greater than 1")
             for combo_batch in chunked_iterable(all_combos, batch_size):
-                idx += 1
-                #参数切片
                 cw_w = [c[0] for c in combo_batch]
                 ct_w = [c[1] for c in combo_batch]
                 vg_w = [c[2] for c in combo_batch]
-                short_w = [c[3] for c in combo_batch]
-                mid_w = [c[4] for c in combo_batch]
-                long_w = [c[5] for c in combo_batch]
-                
-                batch_s_ma = [ma_cache[w].loc[s_str:e_str] for w in short_w]
-                batch_m_ma = [ma_cache[w].loc[s_str:e_str] for w in mid_w]
-                batch_l_ma = [ma_cache[w].loc[s_str:e_str] for w in long_w]
-                
+                idx += 1
+                window_slice = global_dates.slice_indexer(s_str, e_str)
+                # 假设 s_str, e_str 对应的位置是 start_idx, end_idx
+                start_idx = window_slice.start
+                end_idx = window_slice.stop  # 必须 +1 包含结束日
+                combo_batch_size = len(combo_batch)
                 num_symbols = w_close.shape[1]
-            
-                # np.tile 将矩阵按行 1 倍、按列 n_params 倍进行复制
-                ohlc_tile = to_f32_np(w_ohlc)
-                close_tile = to_f32_np(w_close)
-                vol_tile = to_f32_np(w_vol)
-                s_ma_tile = to_f32_np(pd.concat(batch_s_ma, axis=1))
-                m_ma_tile = to_f32_np(pd.concat(batch_m_ma, axis=1))
-                l_ma_tile = to_f32_np(pd.concat(batch_l_ma, axis=1))
-                
-                cw_w_expanded = np.repeat(np.array(cw_w), num_symbols)
-                ct_w_expanded = np.repeat(np.array(ct_w), num_symbols)
-                vg_w_expanded = np.repeat(np.array(vg_w), num_symbols)
+                n_time = end_idx - start_idx
 
+                # 预分配全量平铺矩阵
+                s_ma_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
+                #m_ma_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
+                l_ma_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
+                ma_conv_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
+
+                for i, (cw, ct, vg, s_w, m_w, l_w) in enumerate(combo_batch):
+                    col_start = i * num_symbols
+                    col_end = (i + 1) * num_symbols
+                    conv_comb_column=f"conv_{s_w}_{m_w}_{l_w}"
+                    
+                    # 直接进行 Numpy 切片拷贝，速度极快
+                    # 这里的索引是 [时间切片, 股票切片]
+                    # 如果你的 combo_batch 对应的股票顺序和 ma_np_cache 一致：
+                    s_ma_tile[:, col_start:col_end] = ma_cache[s_w][start_idx:end_idx, :]
+                    #m_ma_tile[:, col_start:col_end] = ma_cache[m_w][start_idx:end_idx, :]
+                    l_ma_tile[:, col_start:col_end] = ma_cache[l_w][start_idx:end_idx, :]
+                    ma_conv = stocks_part_dict[conv_comb_column].loc[s_str:e_str]
+                    ma_conv_tile[:, col_start:col_end] = to_f32_np(ma_conv)
+
+
+
+                # np.tile 将矩阵按行 1 倍、按列 n_params 倍进行复制
+                #ohlc_tile = to_f32_np(w_ohlc)
+                close_tile = to_f32_np(w_close)
+                vol3_tile = to_f32_np(w_vol3)
+                vol10_tile = to_f32_np(w_vol10)
+                pct_tile = to_f32_np(w_pct)
                 # 运行自定义指标
                 entries_np, exits_np = breakout_strategy(
-                    ohlc_tile, close_tile, vol_tile,
-                    s_ma_tile, m_ma_tile, l_ma_tile,
-                    cw_w_expanded, ct_w_expanded, vg_w_expanded,
-                    n_symbols = num_symbols
+                    close_tile, vol3_tile,vol10_tile,pct_tile,ma_conv_tile,
+                    s_ma_tile, l_ma_tile,
+                    cw_w, ct_w, vg_w,
+                    n_3d = (w_close.shape[0],combo_batch_size*num_symbols,num_symbols)
                 )
 
                 # 信号诊断 (仅对每片首个 Batch 采样)
@@ -387,6 +477,21 @@ if __name__ == '__main__':
                     first_combo_entries = entries_np[:, :num_symbols]
                     daily_hits = first_combo_entries.sum(axis=1) # 提取第一组参数 (id=0) 的所有股票信号并求和
                     print(f" [信号诊断] 首组参数日均信号: {daily_hits.mean():.2f} | 峰值: {daily_hits.max()}")
+                    '''
+                    entry_df = pd.DataFrame(
+                        entries_np[:, col_start:col_end], 
+                        index=w_close.index, 
+                        columns=w_close.columns # 这里的 columns 就是那 3 只股票的代码
+                    )
+
+                    # 查看哪些日期产生了信号
+                    for col in entry_df.columns:
+                        sig_dates = entry_df.index[entry_df[col]]
+                        if len(sig_dates) > 0:
+                            print(f"股票 {col} 的入场日期: {sig_dates.tolist()}")
+                        else:
+                            print(f"股票 {col} 在此参数下无信号")
+                    '''
 
 
                 group_by_ids = np.repeat(np.arange(len(combo_batch)), num_symbols)
@@ -408,23 +513,25 @@ if __name__ == '__main__':
                     group_by=group_by_ids, # 按参数组合分组计算
                 )
                 
+                batch_trades = get_batch_trade_details(pf, stocklist, combo_batch, i+1, s_str, e_str, w_close.index)
+                if not batch_trades.empty:
+                    f_path = Path(RESULT_PATH)/f"vb_test_out_{idx}.csv"
+                    batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')
+                    del batch_trades
+        
                 # 收集多维度指标 
                 batch_score = get_score(pf)
+                #batch_score = get_score_single(pf)
                 batch_score.index = pd.MultiIndex.from_tuples(
                     [combo_batch[i] for i in batch_score.index], 
                     names=param_names
                 )
                 window_scores.append(batch_score)
-                batch_trades = get_batch_trade_details(pf, stocklist, combo_batch, i+1, s_str, e_str)
-                if not batch_trades.empty:
-                    f_path = Path(RESULT_PATH)/f"vb_test_out_{idx}.csv"
-                    batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')
-                    del batch_trades
-
+                
                 
                 #显示清理内存
-                del pf, batch_s_ma, batch_m_ma, batch_l_ma, cw_w_expanded,ct_w_expanded,vg_w_expanded,entries_np,exits_np
-                del ohlc_tile, close_tile, vol_tile, s_ma_tile, m_ma_tile, l_ma_tile
+                del pf, entries_np,exits_np, ma_conv_tile, pct_tile
+                del close_tile, vol3_tile, vol10_tile, s_ma_tile, l_ma_tile
                 gc.collect()
 
             if (end_dt - e_dt).days < 30: break
@@ -483,3 +590,4 @@ if __name__ == '__main__':
     #    final_trade_report = pd.concat(all_trade_details, ignore_index=True)
    #     final_trade_report.to_csv(RESULT_PATH, index=False, encoding='utf-8-sig', float_format='%.2f')
    #     print(f"🚀 全时段交易报告已生成！总计 {len(final_trade_report)} 笔交易。")
+   
