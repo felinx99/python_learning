@@ -14,7 +14,7 @@ from . import sectorpick
 from .util.breakout import breakout_strategy
 from api.timeprofile import TimeProfile
 
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test1.csv'
+STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist.csv'
 RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
@@ -339,15 +339,39 @@ def get_robustness_report(all_window_data, param_names):
 def to_f32_np(df):
     return np.ascontiguousarray(df.values, dtype=np.float32)
 
+def compute_cv_adaptive(ma_list):
+    """
+    ma_list: 一个包含多个 Numpy 数组的列表 [ma1, ma2, ma3, ...]
+    每个数组形状均为 (n_time, n_symbols)
+    """
+    # 1. 沿新轴堆叠：形状变为 (n_samples, n_time, n_symbols)
+    # 例如 3 条均线，n_samples 就是 3
+    stacked_ma = np.stack(ma_list, axis=0)
+    
+    # 2. 沿 axis=0 计算均值
+    ma_mean = np.mean(stacked_ma, axis=0)
+    
+    # 3. 沿 axis=0 计算标准差，显式指定 ddof=1 (即分母使用 n-1)
+    # 这是自适应样本数的关键，NumPy 会根据 stacked_ma 的第一维自动处理 n
+    ma_std = np.std(stacked_ma, axis=0, ddof=1)
+    
+    # 4. 计算变异系数
+    cv = (ma_std / (ma_mean + 1e-8)) * 100
+    return cv.astype(np.float32)
+
 if __name__ == '__main__':
     # 1. 准备数据 (建议替换为你的 TDX 数据)
     TICKERS_DF = pd.read_csv(STOCKLIST_PATH, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式
     stocklist = list(TICKERS_DF.to_records(index=False))
+    
     allstocks_data_df = load_all_stocks(stocklist)
+    print("1.加载数据完成")
     allstocks_data_df['volume3'] = allstocks_data_df['volume'].rolling(window=3).mean()
     allstocks_data_df['volume10'] = allstocks_data_df['volume'].rolling(window=10).mean()
     allstocks_data_df['pct_chg'] = allstocks_data_df['ohlc'].pct_change()
     need_cols = ['close', 'ohlc', 'volume3', 'volume10', 'pct_chg']
+    stocks_part_dict = prepare_stocks(src_df=allstocks_data_df, values=need_cols)
+    print("2.生成volume3，pct_chg")
     
     # 2. 数据切片，按指定的split,roll参数进行切片和滚动
     split_config = relativedelta(months=24)
@@ -377,28 +401,21 @@ if __name__ == '__main__':
 
     #预处理sma部分
     all_sma_windows = sorted(short_space + mid_space + long_space)
-    for w in all_sma_windows:
-        sma_period = f"sma_{w}"
-        allstocks_data_df[sma_period] = allstocks_data_df['ohlc'].rolling(window=w).mean()
-    
-    sma_combos = list(itertools.product(short_space, mid_space, long_space)) 
-    for combo in sma_combos:
-        sma_short_columns = f"sma_{combo[0]}"
-        sma_mid_columns = f"sma_{combo[1]}"
-        sma_long_columns = f"sma_{combo[2]}"
-        ma_cols = [sma_short_columns, sma_mid_columns, sma_long_columns]
-        conv_comb_column=f"conv_{combo[0]}_{combo[1]}_{combo[2]}"
-        need_cols.append(conv_comb_column)
-        allstocks_data_df[conv_comb_column] = allstocks_data_df[ma_cols].std(axis=1) / allstocks_data_df[ma_cols].mean(axis=1) * 100
-    
-
-    stocks_part_dict = prepare_stocks(src_df=allstocks_data_df, values=need_cols)
     ma_cache = {}
     for w in all_sma_windows:
+        sma_period = f"sma_{w}"
         ma_cache[w] = vbt.MA.run(stocks_part_dict['ohlc'], window=w).ma.values.astype(np.float32)
+		
+    sma_combos = list(itertools.product(short_space, mid_space, long_space))
+    ma_convg_cache = {}
+    for combo in sma_combos:
+        ma_arrays = [ma_cache[w] for w in combo]
+        # 存入字典，Key 是组合元组
+        ma_convg_cache[(combo[0], combo[1], combo[2])] = compute_cv_adaptive(ma_arrays)
 
+    
     all_combos = list(itertools.product(converged_window_space,converged_threshold_space,vol_gain_space, short_space, mid_space, long_space))
-
+    print(f"3. 均值计算完成,参数组合{len(all_combos)}")
     # 5. 循环窗口执行寻优
     window_results = []
     all_trade_details = []
@@ -408,6 +425,9 @@ if __name__ == '__main__':
     for i, (s_dt, e_dt) in enumerate(time_chunks):
         with TimeProfile():
             s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
+            #if s_str != '2022-07-02':
+            #    continue
+            
             # 局部时间切片 (宽表)
             w_close = stocks_part_dict['close'].loc[s_str:e_str]
             #w_ohlc = stocks_part_dict['ohlc'].loc[s_str:e_str]
@@ -422,7 +442,7 @@ if __name__ == '__main__':
             window_scores = []
             #batch_size保持在10~15之间，可以在内存和运行速度之间平衡
             batch_size = len(short_space)*len(long_space)
-            assert batch_size > 1, print("batch_size should greater than 1")
+            #assert batch_size > 1, print("batch_size should greater than 1")
             for combo_batch in chunked_iterable(all_combos, batch_size):
                 cw_w = [c[0] for c in combo_batch]
                 ct_w = [c[1] for c in combo_batch]
@@ -441,7 +461,7 @@ if __name__ == '__main__':
                 #m_ma_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
                 l_ma_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
                 ma_conv_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
-
+                
                 for i, (cw, ct, vg, s_w, m_w, l_w) in enumerate(combo_batch):
                     col_start = i * num_symbols
                     col_end = (i + 1) * num_symbols
@@ -453,8 +473,7 @@ if __name__ == '__main__':
                     s_ma_tile[:, col_start:col_end] = ma_cache[s_w][start_idx:end_idx, :]
                     #m_ma_tile[:, col_start:col_end] = ma_cache[m_w][start_idx:end_idx, :]
                     l_ma_tile[:, col_start:col_end] = ma_cache[l_w][start_idx:end_idx, :]
-                    ma_conv = stocks_part_dict[conv_comb_column].loc[s_str:e_str]
-                    ma_conv_tile[:, col_start:col_end] = to_f32_np(ma_conv)
+                    ma_conv_tile[:, col_start:col_end] = ma_convg_cache[(s_w, m_w, l_w)][start_idx:end_idx, :]
 
 
 
@@ -515,7 +534,7 @@ if __name__ == '__main__':
                 
                 batch_trades = get_batch_trade_details(pf, stocklist, combo_batch, i+1, s_str, e_str, w_close.index)
                 if not batch_trades.empty:
-                    f_path = Path(RESULT_PATH)/f"vb_test_out_{idx}.csv"
+                    f_path = Path(RESULT_PATH)/'vb'/f"vb_test_out_{idx}.csv"
                     batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')
                     del batch_trades
         
