@@ -166,7 +166,7 @@ def get_batch_trade_details(pf, symbol_names, combo_params, window_id, start_str
 
     # 6. 返回核心列
     return trades_df[[
-        'Window_ID', 'Window_Range', 'Symbol', 'Params', 
+        'Symbol', 'Params', 
         'Entry Date', 'Exit Date', 'Entry Price', 'Exit Price', 
         'Size', 'PnL', 'Return'
     ]]
@@ -532,7 +532,7 @@ if __name__ == '__main__':
                     group_by=group_by_ids, # 按参数组合分组计算
                 )
                 
-                batch_trades = get_batch_trade_details(pf, stocklist, combo_batch, i+1, s_str, e_str, w_close.index)
+                batch_trades = get_batch_trade_details(pf, w_close.columns.tolist(), combo_batch, i+1, s_str, e_str, w_close.index)
                 if not batch_trades.empty:
                     f_path = Path(RESULT_PATH)/'vb'/f"vb_test_out_{idx}.csv"
                     batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')

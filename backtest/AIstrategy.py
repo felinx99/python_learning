@@ -584,7 +584,7 @@ class TrendStrategyTerm:
 
         # --- 基础数据准备 ---
         df = df.copy()
-        df['ma20'] = df['close'].rolling(20).mean()
+        df['ma20'] = df['收盘'].rolling(20).mean()
         df['ma60'] = df['收盘'].rolling(60).mean()
         df['ma120'] = df['收盘'].rolling(120).mean()
         

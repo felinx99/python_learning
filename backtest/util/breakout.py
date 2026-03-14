@@ -53,7 +53,7 @@ def breakout_strategy(close, volume3, volume10, pct_chg, ma_conv, s_ma, l_ma, cv
                     pct_max = max(pct_chg[t, symbol_col], pct_chg[day1, symbol_col], pct_chg[day2, symbol_col])
                     pct_sum = pct_chg[t, symbol_col] + pct_chg[day1, symbol_col] + pct_chg[day2, symbol_col]
                     
-                    entries[t, col] = (pct_min>1e-6) and (pct_max>0.04) and (pct_sum>0.1)
+                    entries[t, col] = (pct_min>1e-6) and (pct_max>0.02) and (pct_sum>0.05)
 
             #短期均线下穿长期均线，则退出
             tmp_d = max(0, t-1)
