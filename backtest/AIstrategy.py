@@ -584,7 +584,7 @@ class TrendStrategyTerm:
 
         # --- 基础数据准备 ---
         df = df.copy()
-        df['ma20'] = df['收盘'].rolling(20).mean()
+        df['ma20'] = df['close'].rolling(20).mean()
         df['ma60'] = df['收盘'].rolling(60).mean()
         df['ma120'] = df['收盘'].rolling(120).mean()
         
@@ -710,10 +710,11 @@ class TrendStrategyTerm:
             print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
-    def daily_monitor_breakout(self, stocklist_df=None, converged_windwos=6, converged_threshold=2.5, vol_gain=2.2):        
+    def daily_monitor_breakout(self, stocklist_df=None, converged_windwos=4, converged_threshold=2.5, vol_gain=1.5):        
         # A. 监测潜力池 (入场信号)
         try:
             signal_list = []
+            tdx_stocklist = []
             srcpath = Path(DATA_PATH)/'all_stock_daily.parquet'
 
             try:
@@ -744,15 +745,14 @@ class TrendStrategyTerm:
 
                 # --- 条件 2：最新3天向上突破 ---             
                 # 1. 基础计算：计算每日涨幅 (全量计分隔夜涨幅和日内涨幅两种,隔夜涨幅可以用ohlc替代close)
-                df['oc'] = (df['open']+df['close'])/2
-                df['pct_chg'] = df['oc'].pct_change()
+                df['pct_chg'] = df['ohlc'].pct_change()
                 # 3.1 最近三天都收涨 (最小值 > 0)
                 df['all_positive'] = df['pct_chg'].rolling(window=3).min() > 0
                 # 3.2 至少1天涨幅 > 5% (最大值 > 0.05)
-                df['has_big_win'] = df['pct_chg'].rolling(window=3).max() > 0.04
+                df['has_big_win'] = df['pct_chg'].rolling(window=3).max() > 0.02
                 # 3.3 3天整体涨幅 > 10% (今日价格 / 3天前价格 - 1)
                 # 注意：iloc[-1]/iloc[-4] 对应的是 3 天的跨度，所以用 shift(3)
-                df['total_3d_gain'] = (df['oc'] / df['oc'].shift(3)) - 1
+                df['total_3d_gain'] = (df['close'] / df['open'].shift(2)) - 1
                 df['gain_large_enough'] = df['total_3d_gain'] > 0.10
 
                 # 4. 综合价格突破条件
@@ -821,6 +821,7 @@ class TrendStrategyTerm:
                         "ATR(10)": round(atr, 3),
                     }
                     signal_list.append(signal_data)
+                    tdx_stocklist.append(row['Code'])
                     print(f"✅ 信号触发: {row['Code']} {row['Name']} (突破 {pivot:.2f})")
         except Exception as e:
             print(f"读取潜力池失败: {e}")
@@ -832,8 +833,9 @@ class TrendStrategyTerm:
         # --- 保存为 CSV ---
         if signal_list:
             result_df = pd.DataFrame(signal_list)
-            self.output_csv = Path(RESULT_PATH)/f"breakout_{self.today}.csv"
+            self.output_csv = Path(RESULT_PATH)/'auto_select'/f"breakout_{self.today}.csv"
             result_df.to_csv(self.output_csv, encoding='utf-8-sig', index=False, date_format=date_fmt['DAY'], float_format='%.2f') 
+            self.data.update_block(block_code='BKXG', stock_list=tdx_stocklist)
             print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")

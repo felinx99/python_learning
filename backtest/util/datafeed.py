@@ -129,14 +129,15 @@ class TdxFeed(FeedBase):
 
         if type(symbol) is not list:
             symbol = [symbol]
+        
         daily_dict = tq.get_market_data(
             field_list=[],
             stock_list=symbol,
             start_time=start_date,
             end_time=end_date,
-            dividend_type='front', #前复权
+            dividend_type='None', #不复权
             period='1d',
-            fill_data=False      #填充缺失数据
+            fill_data=False      #不填充缺失数据
         )
         df = self._data_to_df(daily_dict, type='market')
         return df

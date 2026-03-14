@@ -56,21 +56,22 @@ tq.initialize(__file__)
 
 
 
-#1.基础配置
-block_stocks = tq.get_stock_list_in_sector(block_code='881096.SH',list_type=1) #目标板块
-print(f"total-{len(block_stocks)}: {block_stocks}")
-pass
+#1.基础配置#
+#block_stocks = tq.get_stock_list_in_sector(block_code='881096.SH',list_type=1) #目标板块
+#print(f"total-{len(block_stocks)}: {block_stocks}")
 
 
-'''
+
 start_time = '20200101' #数据起始时间
 target_end = '' #datetime.now().strftime('%Y%m%d') #数据结束时间
 target_gain = 5.0
 target_block_name = 'ZFXG'
 
+refresh_kline = tq.refresh_kline(stock_list=['880501.SH'],period='1d')
+
 #2.数据获取与处理
 df_real = tq.get_market_data(
-    field_list=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'],
+    field_list=[],
     stock_list=['880501.SH'],
     start_time=start_time,
     end_time=target_end,
@@ -78,6 +79,8 @@ df_real = tq.get_market_data(
     period='1d',
     fill_data=False      #填充缺失数据
 )
+
+
 
 stockprice_df = data_to_df(df_real)
 
@@ -136,5 +139,3 @@ else:
     except Exception as e:
         print(f"清空自定义板块失败: {e}")
     print("-" * 50)
-
-'''

@@ -3,12 +3,15 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import talib as ta
+from scipy.stats import linregress
+from numpy.lib.stride_tricks import sliding_window_view
 
 from pathlib import Path
 from .util import datafeed
 
 SECTOR_PATH = 'E:\\datas\\tdx\\sector'
-SLOPE_THRESHOLD = 0.015
+SLOPE_THRESHOLD = 6.5
+SLOPE_WINDOWS= 5
 
 sector_type = {
     'self' : 'SECTOR_SELF', #自选股
@@ -29,11 +32,11 @@ stock_csvtype = {
 }
 
 def calc_ols(df, column='', method=''):
-    windows_len = 5
+    windows_len = SLOPE_WINDOWS
     N = int(''.join(filter(str.isdigit, method)))
     # 提取数据,并价格转换为对数值，对数体现价格的等比变化程序
-    df[method] = ta.SMA(df[column].values.astype('float64'), timeperiod=N)
-    y = np.log(df[method].values)
+    method_df = ta.SMA(df[column].values.astype('float64'), timeperiod=N)
+    y = np.log(method_df)
     n_rows = len(y)   
     k_array = np.full(n_rows, np.nan)
     x = np.arange(windows_len)
@@ -53,17 +56,54 @@ def calc_ols(df, column='', method=''):
         k_values = np.dot(windows, x_centered) / sum_x2_minus_mean    
         k_array[windows_len-1:] = k_values
     # 赋值给 DataFrame
-    column_name = f"{method}_slope"
-    df[column_name] = k_array*10
+    #column_name = f"{method}_slope"
+    method_slope_df = k_array*10
   
-    return df
+    return method_df, method_slope_df
+
+def calc_R(df, column='ohlc', window=5):
+    y = df[column].values.astype('float64')
+    n = window
+    if len(y) < n:
+        return np.full(len(y), np.nan)
+
+    y_wins = sliding_window_view(y, window_shape=n)
+
+    x = np.arange(n)
+    x_sum = n * (n - 1) / 2
+    x_sum_sq = n * (n - 1) * (2 * n - 1) / 6
+    x_var_part = n * x_sum_sq - x_sum**2 
+    
+    y_sum = np.sum(y_wins, axis=1)
+    y_sum_sq = np.sum(y_wins**2, axis=1)
+
+    xy_sum = np.dot(y_wins, x)
+    numerator = n * xy_sum - x_sum * y_sum
+
+    y_var_part = n * y_sum_sq - y_sum**2
+    
+    denominator_sq = x_var_part * y_var_part
+    
+    r2 = np.divide(numerator**2, denominator_sq, 
+                   out=np.zeros_like(numerator), 
+                   where=denominator_sq > 1e-12)
+ 
+    result = np.full(len(y), np.nan)
+    result[n-1:] = r2
+    return result
+
 
 def select_sector(df):
-    df['avg_slope'] = 0.4*df['sma5_slope'] + 0.2*df['sma10_slope'] + 0.4*df['sma20_slope']
-    #筛选条件 
-    df['slect_res'] = df['avg_slope'] > SLOPE_THRESHOLD
+    sma5_df,sma5_slope_df =  calc_ols(df=df, column='ohlc', method='sma5')                
+    sma10_df,sma10_slope_df = calc_ols(df=df, column='ohlc', method='sma10')
+    sma20_df,sma20_slope_df = calc_ols(df=df, column='ohlc', method='sma20')
+    df['avg_slope'] = 0.4*sma5_slope_df + 0.2*sma10_slope_df + 0.4*sma20_slope_df
+    weight = calc_R(df, column='ohlc', window=5)
+    #筛选条件 df['avg_slope'] > SLOPE_THRESHOLD 权重大于2
+    #k=0.02,R2=0.4,a=15*R2, threshold = np.degress(np.arctan(a*k)
+    slect_res_df = (np.degrees(np.arctan(15 * weight * df['avg_slope']))   > SLOPE_THRESHOLD) & (sma20_slope_df > 0.001)
 
-    return df['slect_res'].iloc[-1], df['avg_slope'].iloc[-1]
+    return slect_res_df
 
 def get_up_sector(sectorlist=[], ret=''):
 
@@ -80,15 +120,13 @@ def get_up_sector(sectorlist=[], ret=''):
             sector_file = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}.csv"
             sector_df = pd.read_csv(sector_file, dtype=stock_csvtype, parse_dates=['date'])
             sector_df['ohlc'] = sector_df.eval('(high + 2*open + 2*close + low) / 6')
-            calc_ols(df=sector_df, column='ohlc', method='sma5')                
-            calc_ols(df=sector_df, column='ohlc', method='sma10')
-            calc_ols(df=sector_df, column='ohlc', method='sma20')
             sector_df['symbol'] = symbol
             sector_df['name'] = f"{sector_code[1]}"
+
             #dst_file = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}_slope.csv"
             #sector_df.to_csv(dst_file, sep=',', encoding='utf-8-sig', index=False, date_format='%Y-%m-%d', float_format='%.3f')
-            select_sector(sector_df)
-            df_list.append(sector_df.loc[sector_df['avg_slope'] > SLOPE_THRESHOLD, ['date', 'symbol', 'name', 'avg_slope']].copy())
+            slect_res_df = select_sector(sector_df)
+            df_list.append(sector_df.loc[slect_res_df == True, ['date', 'symbol', 'name', 'avg_slope']].copy())
             
 
     df_result = pd.concat(df_list , ignore_index=True)

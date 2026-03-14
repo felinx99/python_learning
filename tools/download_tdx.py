@@ -23,8 +23,6 @@ EXCHANGE = ['sh', 'sz', 'bj']
 
 SECTOR_PATH = 'E:\\datas\\tdx\\sector'
 
-SLOPE_THRESHOLD = 0.015
-SLOPE_WINDOWS= 5
 SHORT = 5
 MID = 10
 LONG =20
@@ -77,36 +75,6 @@ sector_type = {
     'l3' : 'SECTOR_L3'
 }
 
-def calc_ols(df, column='', method=''):
-    windows_len = SLOPE_WINDOWS
-    N = int(''.join(filter(str.isdigit, method)))
-    # 提取数据,并价格转换为对数值，对数体现价格的等比变化程序
-    df[method] = ta.SMA(df[column].values.astype('float64'), timeperiod=N)
-    y = np.log(df[method].values)
-    n_rows = len(y)   
-    k_array = np.full(n_rows, np.nan)
-    x = np.arange(windows_len)
-    x_mean = np.mean(x)
-    sum_x2_minus_mean = np.sum((x - x_mean)**2) # 对应公式的分母
-    
-    # 只有当索引大于等于 N + (N-1) 时，才有足够的数据计算
-    start_idx = N + windows_len - 1 
-    
-    # 使用 NumPy 的滑动窗口视图提高效率
-    from numpy.lib.stride_tricks import sliding_window_view
-    
-    if n_rows >= start_idx:
-        windows = sliding_window_view(y, window_shape=windows_len)
-        # 计算斜率 k: sum((x - x_mean) * (y - y_mean)) / sum((x - x_mean)^2)
-        x_centered = x - x_mean
-        k_values = np.dot(windows, x_centered) / sum_x2_minus_mean    
-        k_array[windows_len-1:] = k_values
-    # 赋值给 DataFrame
-    column_name = f"{method}_slope"
-    df[column_name] = k_array*10
-  
-    return df
-
 def prepare_date(df=None):
     method = 'sma'
     method_short = f'{method}{SHORT}'
@@ -114,9 +82,9 @@ def prepare_date(df=None):
     method_long = f'{method}{LONG}'
 
     df['ohlc'] = df.eval('(high + 2*open + 2*close + low) / 6')
-    calc_ols(df=df, column='ohlc', method=method_short)                
-    calc_ols(df=df, column='ohlc', method=method_mid)
-    calc_ols(df=df, column='ohlc', method=method_long)
+    #calc_ols(df=df, column='ohlc', method=method_short)                
+    #calc_ols(df=df, column='ohlc', method=method_mid)
+    #calc_ols(df=df, column='ohlc', method=method_long)
 
     return df
 
