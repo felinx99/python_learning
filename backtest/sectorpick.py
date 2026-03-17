@@ -117,6 +117,9 @@ def get_up_sector(sectorlist=[], ret=''):
         sectorlist_df = pd.read_csv(sectorlistpath, skiprows=1, header=None)
         for _, sector_code in sectorlist_df.iterrows():
             symbol = f"{sector_code[0]}"
+            sectorlist = get_list_in_sector(symbol)
+            if len(sectorlist) < 6:
+                continue
             sector_file = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}.csv"
             sector_df = pd.read_csv(sector_file, dtype=stock_csvtype, parse_dates=['date'])
             sector_df['ohlc'] = sector_df.eval('(high + 2*open + 2*close + low) / 6')

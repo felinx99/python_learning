@@ -734,6 +734,9 @@ class TrendStrategyTerm:
 
 
                 # 计算收敛度 (变异系数 CV)
+                df['sma5'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=5)
+                df['sma10'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=10)
+                df['sma20'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=20)
                 ma_cols = ['sma5', 'sma10', 'sma20']
                 df['converged'] = df[ma_cols].std(axis=1) / df[ma_cols].mean(axis=1) * 100
 
@@ -774,7 +777,7 @@ class TrendStrategyTerm:
                 
                 # 2.2 量能特征
                 df['avg_vol_3d'] = df['volume'].rolling(window=3).mean()
-                df['ma_vol_10'] = df['volume'].rolling(window=10).mean()
+                df['ma_vol_10'] = df['volume'].rolling(window=7).mean().shift(3)
                 df['volume_ignited'] = df['avg_vol_3d'] > (df['ma_vol_10'] * vol_gain)
                 df['volume_ignited'] = df['volume_ignited'].fillna(False)
 
