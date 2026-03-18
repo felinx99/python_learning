@@ -11,14 +11,18 @@ import vectorbt as vbt
 from pathlib import Path
 from dateutil.relativedelta import relativedelta
 from . import sectorpick
-from .util.breakout import breakout_strategy
+from .util.breakout import breakout_strategy, fast_score_kernel
 from api.timeprofile import TimeProfile
+
+
 
 STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist.csv'
 RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
 ENDDATE = '2025-12-26'
+YEAR_DAYS = 244.0
+vbt.settings.returns['year_freq'] = pd.Timedelta(days=244)
 
 stock_csvtype = {
     'open': 'float32',
@@ -197,7 +201,7 @@ def get_score_single(pf):
     else:
         dd_dur_days = float(max_dur)
     
-    dd_score = np.clip(1.0 - (dd_dur_days / 252.0), 0.0, 1.0)
+    dd_score = np.clip(1.0 - (dd_dur_days / YEAR_DAYS), 0.0, 1.0)
 
     # 6. 计算最终得分
     calmar = ann_ret / max_dd
@@ -216,20 +220,72 @@ def get_score_single(pf):
         'final_value': float(final_value)
     }
 
+def debug_compare(pf, n_time, batch_size):
+    # 1. 提取 VBT 标准值
+    vbt_ann = pf.annualized_return().values
+    vbt_mdd = pf.max_drawdown().values
+    vbt_sharpe = pf.sharpe_ratio().values.astype(np.float32)
+    
+    # 2. 提取 NJIT 的输入
+    value_arr = pf.value().values.astype(np.float32)
+    init_cash_arr = pf.init_cash.values.astype(np.float32)
+
+    # 3. 运行 NJIT 内核
+    ann_rets, max_dds, dd_durs, sharpe, final_vals = fast_score_kernel(value_arr, init_cash_arr)
+
+    # 4. 逐项对比打印 (取第一组参数)
+    print(f"{'Metric':<15} | {'VBT Result':<15} | {'NJIT Result':<15} | {'Diff'}")
+    print("-" * 60)
+    print(f"{'Ann Return':<15} | {vbt_ann[0]:<15.6f} | {ann_rets[0]:<15.6f} | {vbt_ann[0]-ann_rets[0]:.6f}")
+    print(f"{'Max DD':<15} | {vbt_mdd[0]:<15.6f} | {max_dds[0]:<15.6f} | {vbt_mdd[0]-max_dds[0]:.6f}")
+    print(f"{'Sharpe':<15} | {vbt_sharpe[0]:<15.6f} | {sharpe[0]:<15.6f} | {vbt_sharpe[0]-sharpe[0]:.6f}")
+    print(f"{'Final Value':<15} | {pf.final_value().values[0]:<15.2f} | {final_vals[0]:<15.2f} | {pf.final_value().values[0]-final_vals[0]:.2f}")
+    pass
+
+def get_score_njit(pf, n_time, batch_size):
+    value_arr = pf.value().values.astype(np.float32)
+    win_rate = pf.trades.win_rate().values.astype(np.float32)
+    init_cash_arr = pf.init_cash.values.astype(np.float32)
+        
+    # 3. 调用内核 (不再传递 None)
+    ann_rets, max_dds, dd_dur_days, sharpe_ratios, final_values = fast_score_kernel(
+        value_arr, 
+        init_cash_arr
+    )
+    # 4. 后处理与评分 (向量化)
+    safe_max_dd = np.where(max_dds <= 0, 0.001, max_dds)
+    calmar = ann_rets / safe_max_dd
+    
+    # 限制极值，防止得分爆炸
+    ann_rets_c = np.clip(np.nan_to_num(ann_rets, nan=-0.99), -0.99, 2.0)
+    sharpe_c = np.clip(np.nan_to_num(sharpe_ratios, nan=0.0), -5.0, 5.0)
+    win_rate_c = np.nan_to_num(win_rate, nan=0.0)
+    
+    score = (0.4 * calmar) + (0.2 * sharpe_c) + (0.2 * win_rate_c)
+    return pd.DataFrame({
+        'score': score.astype(np.float32),
+        'ann_ret': ann_rets_c.astype(np.float32),
+        'max_dd': safe_max_dd.astype(np.float32),
+        'sharpe': sharpe_c.astype(np.float32),
+        'win_rate': win_rate_c.astype(np.float32),
+        'dd_dur': dd_dur_days,
+        'final_value': final_values.astype(np.float32)
+    }, index=np.arange(len(score)))
+
+
 # 4. 定义评分函数 (复用你之前的多维度逻辑)
 def get_score(pf):
     # 1. 批量提取底层数据 (Series 格式，底层是 NumPy)
-    ann_ret = pf.annualized_return().values
-    max_dd = pf.max_drawdown().values
-    sharpe = pf.sharpe_ratio().values
-    win_rate = pf.trades.win_rate().values
-    final_value = pf.final_value().values
+    ann_ret = pf.annualized_return().values.astype(np.float32)
+    max_dd = pf.max_drawdown().values.astype(np.float32)
+    sharpe = pf.sharpe_ratio().values.astype(np.float32)
+    win_rate = pf.trades.win_rate().values.astype(np.float32)
+    final_value = pf.final_value().values.astype(np.float32)
     
     # 2. 极致优化时间处理：避开 .dt.days
     # 获取最大回撤持续时间 (timedelta64)
     # 直接用 NumPy 转换天数，比 .dt.days 快 10-50 倍
-    duration_values = pf.drawdowns.max_duration().values
-    dd_dur_days = duration_values.astype('timedelta64[D]').astype(np.float32)
+    dd_dur_days = pf.drawdowns.max_duration().values.astype('timedelta64[D]').astype(np.float32)
     
     # 3. 向量化清理与得分计算 (使用 NumPy 处理，不产生中间 Series)
     # 处理 ann_ret
@@ -249,7 +305,7 @@ def get_score(pf):
     
     # 4. 指标合成
     calmar = ann_ret / max_dd_abs
-    dd_score = np.clip(1.0 - (dd_dur_days / 252.0), 0.0, 1.0)
+    dd_score = np.clip(1.0 - (dd_dur_days / YEAR_DAYS), 0.0, 1.0)
     
     # 综合得分
     score = (0.4 * calmar) + (0.2 * dd_score) + (0.2 * sharpe) + (0.2 * win_rate)
@@ -340,8 +396,6 @@ def get_robustness_report(all_window_data, param_names):
     
     return robust_df.sort_values(by='final_robust_rank', ascending=False)
 
-def to_f32_np(df):
-    return np.ascontiguousarray(df.values, dtype=np.float32)
 
 def compute_cv_adaptive(ma_list):
     """
@@ -380,6 +434,7 @@ if __name__ == '__main__':
     allstocks_data_df['atr'] = ta.ATR(allstocks_data_df.high, allstocks_data_df.low, allstocks_data_df.close, timeperiod=14)
     need_cols = ['close', 'high', 'atr', 'ohlc', volume_short_column, volume_long_column, 'pct_chg']
     stocks_part_dict = prepare_stocks(src_df=allstocks_data_df, values=need_cols)
+    del allstocks_data_df
     close_np = stocks_part_dict['close'].values
     high_np = stocks_part_dict['high'].values
     atr_np = stocks_part_dict['atr'].values
@@ -403,7 +458,7 @@ if __name__ == '__main__':
     #converged_window_space = [6]
     #converged_threshold_space = [3]
     #vol_gain_space = [2.2]
-    #k_atr_space = [3.0]
+    #k_atr_space = [4.0]
     #short_space = [6]
     #mid_space = [14]
     #long_space = [20,25]
@@ -411,7 +466,7 @@ if __name__ == '__main__':
     converged_window_space = [4,5,6]
     converged_threshold_space = [1.8, 2.1, 2.4, 2.7]
     vol_gain_space = [1.3, 1.5, 1.8, 2.1]
-    k_atr_space = [2.5, 3.0, 3.5, 4.0]
+    k_atr_space = [3.0, 3.5, 4.0, 4.5]
     short_space = (3,4,5)
     mid_space = (8, 10, 12, 14)
     long_space = (20,25,30,35)
@@ -444,8 +499,8 @@ if __name__ == '__main__':
     for i, (s_dt, e_dt) in enumerate(time_chunks):
         with TimeProfile():
             s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
-            #if s_str != '2022-07-02':
-            #    continue
+            if s_str != '2024-01-02':
+                continue
             window_slice = global_dates.slice_indexer(s_str, e_str)
             # 假设 s_str, e_str 对应的位置是 start_idx, end_idx
             start_idx = window_slice.start
@@ -474,25 +529,18 @@ if __name__ == '__main__':
                 ct_w = [c[1] for c in combo_batch]
                 vg_w = [c[2] for c in combo_batch]
                 k_atr_w = [c[3] for c in combo_batch]
+                s_keys = [c[4] for c in combo_batch] # 对应 s_w
+                #m_keys = [c[5] for c in combo_batch] # 对应 s_w
+                l_keys = [c[6] for c in combo_batch] # 对应 l_w
+                conv_keys = [(c[4], c[5], c[6]) for c in combo_batch] # 对应 (s_w, m_w, l_w)
                 idx += 1
                 combo_batch_size = len(combo_batch)
-
-                # 预分配全量平铺矩阵
-                s_ma_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
-                #m_ma_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
-                l_ma_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
-                ma_conv_tile = np.empty((n_time, combo_batch_size * num_symbols), dtype=np.float32)
                 
-                for i, (cw, ct, vg, k_atr, s_w, m_w, l_w) in enumerate(combo_batch):
-                    col_start = i * num_symbols
-                    col_end = (i + 1) * num_symbols
-                    conv_comb_column=f"conv_{s_w}_{m_w}_{l_w}"
-                    
-                    s_ma_tile[:, col_start:col_end] = ma_cache[s_w][window_slice, :]
-                    #m_ma_tile[:, col_start:col_end] = ma_cache[m_w][window_slice, :]
-                    l_ma_tile[:, col_start:col_end] = ma_cache[l_w][window_slice, :]
-                    ma_conv_tile[:, col_start:col_end] = ma_convg_cache[(s_w, m_w, l_w)][window_slice, :]
-
+                s_ma_tile = np.hstack([ma_cache[k][window_slice] for k in s_keys])
+                #m_ma_tile = np.hstack([ma_cache[k][window_slice] for k in m_keys])
+                l_ma_tile = np.hstack([ma_cache[k][window_slice] for k in l_keys])
+                ma_conv_tile = np.hstack([ma_convg_cache[k][window_slice] for k in conv_keys])
+            
                 # 运行自定义指标
                 entries_np, exits_np = breakout_strategy(
                     close_tile, high_tile, atr_tile, vol3_tile,vol10_tile,pct_tile,ma_conv_tile,
@@ -507,6 +555,58 @@ if __name__ == '__main__':
                     daily_hits = first_combo_entries.sum(axis=1) # 提取第一组参数 (id=0) 的所有股票信号并求和
                     print(f" [信号诊断] 首组参数日均信号: {daily_hits.mean():.2f} | 峰值: {daily_hits.max()}")
 
+                # 1. 明确区分数据类型
+                # 基础行情数据（只有 num_symbols 列）
+                base_data_map = {
+                    'close': close_tile,
+                    'vol3': vol3_tile,
+                    'vol10': vol10_tile,
+                    'pct_chg': pct_tile
+                }
+
+                # 随参数变化的指标和信号（有 combo_batch_size * num_symbols 列）
+                param_data_map = {
+                    'ma_cv': ma_conv_tile,
+                    'sma_s': s_ma_tile,
+                    'sma_l': l_ma_tile,
+                    'entry': entries_np.astype(np.int8),
+                    'exit': exits_np.astype(np.int8)
+                }
+
+                all_debug_rows = []
+
+                for p_idx, params in enumerate(combo_batch):
+                    p_str = f"P{p_idx+1}_({params[0]}, {params[1]}, {params[2]}, {params[3]})" # 简化参数显示
+                    sma_str = f"P{p_idx+1}_({params[4]}, {params[5]}, {params[6]})" # 简化参数显示
+                    
+                    for s_idx in range(num_symbols):
+                        stock_name = stocks_part_dict['close'].columns[s_idx]
+                        actual_col = p_idx * num_symbols + s_idx # 指标信号用的平铺索引
+                        
+                        # 创建基础 DF
+                        df_single = pd.DataFrame({
+                            'date': global_dates[window_slice],
+                            'symbol': stock_name,
+                            'param_set': p_str,
+                            'sma_set': sma_str
+                        })
+                        
+                        # 填充基础行情 (用 s_idx 取值，0-3)
+                        for col_name, data_np in base_data_map.items():
+                            df_single[col_name] = data_np[:, s_idx]
+                            
+                        # 填充参数相关数据 (用 actual_col 取值，0-7)
+                        for col_name, data_np in param_data_map.items():
+                            df_single[col_name] = data_np[:, actual_col]
+                        
+                        all_debug_rows.append(df_single)
+
+                # 合并保存逻辑不变...
+                if all_debug_rows:
+                    debug_final_df = pd.concat(all_debug_rows, ignore_index=True)
+                    f_path = Path(RESULT_PATH)/'vbtest'/f"debug_full_snapshot_{s_str}_{e_str}.csv"
+                    debug_final_df.to_csv(f_path, index=False, encoding='utf-8-sig')
+
                 group_by_ids = np.repeat(np.arange(len(combo_batch)), num_symbols)
 
                 # 运行组合回测
@@ -514,33 +614,40 @@ if __name__ == '__main__':
                     close = np.tile(close_tile, (1, len(combo_batch))),
                     entries=entries_np,
                     exits=exits_np, 
-                    size=0.01, # 单次开仓2%
+                    size=0.2, # 单次开仓2%
                     size_type='percent',
                     cash_sharing=True,
                     #call_seq='random',
                     fees=0.002,
                     slippage=0.001,
                     freq='D',
-                    init_cash=10000000,
+                    init_cash=1000000,
                     group_by=group_by_ids, # 按参数组合分组计算
-                    accumulate = True,
-                    direction='longonly'
+                    #accumulate = True,
+                    #direction='longonly'
                 )
                  
-                if (s_str == '2024-01-02'):
+                if s_str == '2024-01-02':
                     batch_trades = get_batch_trade_details(pf, stocks_part_dict['close'].columns, combo_batch, i+1, s_str, e_str, global_dates[window_slice])
                     if not batch_trades.empty:
                         f_path = Path(RESULT_PATH)/'vb'/f"vb_test_out_{idx}.csv"
                         batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')
-                        del batch_trades
+                    del batch_trades
         
                 # 收集多维度指标 
+                debug_compare(pf, n_time, batch_size)
                 batch_score = get_score(pf)
+                batch_score_njit = get_score_njit(pf, n_time, batch_size)
                 #batch_score = get_score_single(pf)
                 batch_score.index = pd.MultiIndex.from_tuples(
                     [combo_batch[i] for i in batch_score.index], 
                     names=param_names
                 )
+                batch_score_njit.index = pd.MultiIndex.from_tuples(
+                    [combo_batch[i] for i in batch_score_njit.index], 
+                    names=param_names
+                )
+
                 window_scores.append(batch_score)
                 
                 

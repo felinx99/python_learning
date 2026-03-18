@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from scipy.stats import linregress
 from zmq import IntEnum
 from .util import datafeed
-from . import sectorpick
+from .sectorpick import Sector
 
 RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\tmp'
 STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test.csv'
@@ -845,8 +845,8 @@ class TrendStrategyTerm:
 
 # --- 执行入口 ---
 if __name__ == "__main__":
-    feed = datafeed.FeedManager.register('tdx')
-    feed.init_feed()
+    mysector = Sector()
+    feed = mysector.get_feed()
     indicator = DfIndicators()
     ts = TrendStrategyTerm(datafeed=feed, indicator=indicator)
     #ws = WeeklyScanner(datafeed=feed, indicator=indicator)
@@ -857,16 +857,12 @@ if __name__ == "__main__":
     #    ws.weekly_scan()
 
 
+    
+    sectors_list = mysector.get_up_sector(sectorlist=['concept', 'l3'], ret='today')
+    mysector.update_sector(block_code='ZFBK', update_list=sectors_list)
 
-    sectors_list = sectorpick.get_up_sector(sectorlist=['concept', 'l3'], ret='today')
-    feed.update_block(block_code='ZFBK', stock_list=sectors_list)
 
-    stock_list = []
-    for sector in sectors_list:
-        templist = feed.get_stocklist_in_index(sector=sector)
-        stock_list.append(templist)
-
-    stocklist_df = pd.concat(stock_list, ignore_index=True).drop_duplicates()
+    stocklist_df = mysector.get_list_in_sector(sectorlist=sectors_list)
     ts.daily_monitor_breakout(stocklist_df)
     
     

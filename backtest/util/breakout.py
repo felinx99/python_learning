@@ -4,6 +4,73 @@ import vectorbt as vbt
 import itertools
 import gc
 from numba import njit, prange
+YEAR_DAYS = 244.0
+
+@njit(parallel=True, fastmath=True)
+def fast_score_kernel(value_arr, init_cash_arr):
+    n_time = value_arr.shape[0]
+    n_groups = value_arr.shape[1]
+    
+    ann_rets = np.zeros(n_groups, dtype=np.float32)
+    max_dds = np.zeros(n_groups, dtype=np.float32)
+    dd_dur_days = np.zeros(n_groups, dtype=np.int32)
+    sharpe_ratios = np.zeros(n_groups, dtype=np.float32)
+    final_values = np.zeros(n_groups, dtype=np.float32)
+    
+    ann_factor = YEAR_DAYS
+    years = n_time / ann_factor
+    
+    for j in range(n_groups):
+        group_value = value_arr[:, j]
+        init_cash = init_cash_arr[j] # 从数组中获取对应组的初始资金
+        
+        last_val = group_value[-1]
+        final_values[j] = last_val
+        
+        # 年化收益率
+        if init_cash > 0:
+            ratio = last_val / init_cash
+            if ratio > 0:
+                ann_rets[j] = (ratio ** (1.0 / years)) - 1
+            else:
+                ann_rets[j] = -1.0
+        
+        # 最大回撤
+        peak = 0
+        mdd = 0.0
+        max_dur = 0
+        curr_dd_start_idx = 0
+        for i in range(n_time):
+            val = group_value[i]
+            if val > peak: 
+                peak = val
+                curr_dd_start_idx = i
+            else:
+                if peak > 0:
+                    dd = (peak - val) / peak
+                    if dd > mdd: mdd = dd
+                    curr_dur = i - curr_dd_start_idx
+                    if curr_dur > max_dur:
+                        max_dur = curr_dur
+        max_dds[j] = mdd
+        dd_dur_days[j] = max_dur
+        
+        # 夏普率
+        sum_r = 0.0
+        sum_r2 = 0.0
+        count = n_time - 1
+        if count > 1:
+            for i in range(count):
+                r = (group_value[i+1] / group_value[i]) - 1
+                sum_r += r
+                sum_r2 += r * r
+            mean_r = sum_r / count
+            var_r = (sum_r2 / count) - (mean_r ** 2)
+            std_r = np.sqrt(max(0.0, var_r))
+            if std_r > 1e-9:
+                sharpe_ratios[j] = (mean_r / std_r) * np.sqrt(ann_factor)
+
+    return ann_rets, max_dds, dd_dur_days, sharpe_ratios, final_values
 
 @njit(parallel=True, fastmath=True)
 def breakout_strategy(close, high, atr, volume_s, volume_l, pct_chg, ma_conv, s_ma, l_ma, cv_w, ct, vg, k_atr, n_3d):
