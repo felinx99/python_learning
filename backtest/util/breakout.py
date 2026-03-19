@@ -6,17 +6,47 @@ import gc
 from numba import njit, prange
 YEAR_DAYS = 244.0
 
+@njit
+def fast_fill_nan(arr):
+    """
+    针对 (Time, Symbol) 矩阵的纯 NumPy/Numba 版 ffill + fillna(0)
+    """
+    n_time, n_col = arr.shape
+    out = arr.copy()
+    for j in range(n_col):
+        last_val = 0.0 # 初始填充值为 0 (针对未上市情况)
+        for i in range(n_time):
+            curr_val = out[i, j]
+            if np.isnan(curr_val):
+                out[i, j] = last_val
+            else:
+                last_val = curr_val
+    return out
+
 @njit(parallel=True, fastmath=True)
-def fast_score_kernel(value_arr, init_cash_arr):
-    n_time = value_arr.shape[0]
-    n_groups = value_arr.shape[1]
+def fast_score_kernel(close, assets, cash_raw, init_cash_arr):
+    n_time = cash_raw.shape[0]
+    n_groups = cash_raw.shape[1]
+    n_symbol = close.shape[1]
     
+    group_values = np.zeros((n_time, n_groups), dtype=np.float32)
     ann_rets = np.zeros(n_groups, dtype=np.float32)
     max_dds = np.zeros(n_groups, dtype=np.float32)
     dd_dur_days = np.zeros(n_groups, dtype=np.int32)
     sharpe_ratios = np.zeros(n_groups, dtype=np.float32)
     final_values = np.zeros(n_groups, dtype=np.float32)
     
+    for t in range(n_time):
+        for g in range(n_groups):
+            val_sum = 0.0
+            for i in range(n_symbol):
+                # 对应源码中的 close[assets == 0] = 0. 逻辑
+                # 如果 assets 为 0，乘积自然为 0，省去了判断
+                assets_idx = i + g * n_symbol
+                val_sum += close[t, i] * assets[t, assets_idx]
+            group_values[t, g] = val_sum
+
+    value_arr = group_values + cash_raw
     ann_factor = YEAR_DAYS
     years = n_time / ann_factor
     
