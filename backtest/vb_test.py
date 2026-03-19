@@ -220,28 +220,6 @@ def get_score_single(pf):
         'final_value': float(final_value)
     }
 
-def debug_compare(pf, n_time, batch_size):
-    # 1. 提取 VBT 标准值
-    vbt_ann = pf.annualized_return().values
-    vbt_mdd = pf.max_drawdown().values
-    vbt_sharpe = pf.sharpe_ratio().values.astype(np.float32)
-    
-    # 2. 提取 NJIT 的输入
-    value_arr = pf.value().values.astype(np.float32)
-    init_cash_arr = pf.init_cash.values.astype(np.float32)
-
-    # 3. 运行 NJIT 内核
-    ann_rets, max_dds, dd_durs, sharpe, final_vals = fast_score_kernel(value_arr, init_cash_arr)
-
-    # 4. 逐项对比打印 (取第一组参数)
-    print(f"{'Metric':<15} | {'VBT Result':<15} | {'NJIT Result':<15} | {'Diff'}")
-    print("-" * 60)
-    print(f"{'Ann Return':<15} | {vbt_ann[0]:<15.6f} | {ann_rets[0]:<15.6f} | {vbt_ann[0]-ann_rets[0]:.6f}")
-    print(f"{'Max DD':<15} | {vbt_mdd[0]:<15.6f} | {max_dds[0]:<15.6f} | {vbt_mdd[0]-max_dds[0]:.6f}")
-    print(f"{'Sharpe':<15} | {vbt_sharpe[0]:<15.6f} | {sharpe[0]:<15.6f} | {vbt_sharpe[0]-sharpe[0]:.6f}")
-    print(f"{'Final Value':<15} | {pf.final_value().values[0]:<15.2f} | {final_vals[0]:<15.2f} | {pf.final_value().values[0]-final_vals[0]:.2f}")
-    pass
-
 def get_score_njit(pf, n_time, batch_size):
     value_arr = pf.value().values.astype(np.float32)
     win_rate = pf.trades.win_rate().values.astype(np.float32)
@@ -471,8 +449,6 @@ if __name__ == '__main__':
     mid_space = (8, 10, 12, 14)
     long_space = (20,25,30,35)
 
-
-
     #预处理sma部分
     all_sma_windows = sorted(short_space + mid_space + long_space)
     ma_cache = {}
@@ -499,8 +475,8 @@ if __name__ == '__main__':
     for i, (s_dt, e_dt) in enumerate(time_chunks):
         with TimeProfile():
             s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
-            if s_str != '2024-01-02':
-                continue
+            #if s_str != '2024-01-02':
+            #    continue
             window_slice = global_dates.slice_indexer(s_str, e_str)
             # 假设 s_str, e_str 对应的位置是 start_idx, end_idx
             start_idx = window_slice.start
@@ -523,7 +499,6 @@ if __name__ == '__main__':
             window_scores = []
             #batch_size保持在10~15之间，可以在内存和运行速度之间平衡
             batch_size = len(short_space)*len(mid_space)*len(long_space)
-            #assert batch_size > 1, print("batch_size should greater than 1")
             for combo_batch in chunked_iterable(all_combos, batch_size):   
                 cw_w = [c[0] for c in combo_batch]
                 ct_w = [c[1] for c in combo_batch]
@@ -536,7 +511,7 @@ if __name__ == '__main__':
                 idx += 1
                 combo_batch_size = len(combo_batch)
                 
-                s_ma_tile = np.hstack([ma_cache[k][window_slice] for k in s_keys])
+                #s_ma_tile = np.hstack([ma_cache[k][window_slice] for k in s_keys])
                 #m_ma_tile = np.hstack([ma_cache[k][window_slice] for k in m_keys])
                 l_ma_tile = np.hstack([ma_cache[k][window_slice] for k in l_keys])
                 ma_conv_tile = np.hstack([ma_convg_cache[k][window_slice] for k in conv_keys])
@@ -544,8 +519,7 @@ if __name__ == '__main__':
                 # 运行自定义指标
                 entries_np, exits_np = breakout_strategy(
                     close_tile, high_tile, atr_tile, vol3_tile,vol10_tile,pct_tile,ma_conv_tile,
-                    s_ma_tile, l_ma_tile,
-                    cw_w, ct_w, vg_w, k_atr_w,
+                    l_ma_tile, cw_w, ct_w, vg_w, k_atr_w,
                     n_3d = (n_time,combo_batch_size*num_symbols,num_symbols)
                 )
                 
@@ -555,58 +529,6 @@ if __name__ == '__main__':
                     daily_hits = first_combo_entries.sum(axis=1) # 提取第一组参数 (id=0) 的所有股票信号并求和
                     print(f" [信号诊断] 首组参数日均信号: {daily_hits.mean():.2f} | 峰值: {daily_hits.max()}")
 
-                # 1. 明确区分数据类型
-                # 基础行情数据（只有 num_symbols 列）
-                base_data_map = {
-                    'close': close_tile,
-                    'vol3': vol3_tile,
-                    'vol10': vol10_tile,
-                    'pct_chg': pct_tile
-                }
-
-                # 随参数变化的指标和信号（有 combo_batch_size * num_symbols 列）
-                param_data_map = {
-                    'ma_cv': ma_conv_tile,
-                    'sma_s': s_ma_tile,
-                    'sma_l': l_ma_tile,
-                    'entry': entries_np.astype(np.int8),
-                    'exit': exits_np.astype(np.int8)
-                }
-
-                all_debug_rows = []
-
-                for p_idx, params in enumerate(combo_batch):
-                    p_str = f"P{p_idx+1}_({params[0]}, {params[1]}, {params[2]}, {params[3]})" # 简化参数显示
-                    sma_str = f"P{p_idx+1}_({params[4]}, {params[5]}, {params[6]})" # 简化参数显示
-                    
-                    for s_idx in range(num_symbols):
-                        stock_name = stocks_part_dict['close'].columns[s_idx]
-                        actual_col = p_idx * num_symbols + s_idx # 指标信号用的平铺索引
-                        
-                        # 创建基础 DF
-                        df_single = pd.DataFrame({
-                            'date': global_dates[window_slice],
-                            'symbol': stock_name,
-                            'param_set': p_str,
-                            'sma_set': sma_str
-                        })
-                        
-                        # 填充基础行情 (用 s_idx 取值，0-3)
-                        for col_name, data_np in base_data_map.items():
-                            df_single[col_name] = data_np[:, s_idx]
-                            
-                        # 填充参数相关数据 (用 actual_col 取值，0-7)
-                        for col_name, data_np in param_data_map.items():
-                            df_single[col_name] = data_np[:, actual_col]
-                        
-                        all_debug_rows.append(df_single)
-
-                # 合并保存逻辑不变...
-                if all_debug_rows:
-                    debug_final_df = pd.concat(all_debug_rows, ignore_index=True)
-                    f_path = Path(RESULT_PATH)/'vbtest'/f"debug_full_snapshot_{s_str}_{e_str}.csv"
-                    debug_final_df.to_csv(f_path, index=False, encoding='utf-8-sig')
-
                 group_by_ids = np.repeat(np.arange(len(combo_batch)), num_symbols)
 
                 # 运行组合回测
@@ -614,7 +536,7 @@ if __name__ == '__main__':
                     close = np.tile(close_tile, (1, len(combo_batch))),
                     entries=entries_np,
                     exits=exits_np, 
-                    size=0.2, # 单次开仓2%
+                    size=0.01, # 单次开仓2%
                     size_type='percent',
                     cash_sharing=True,
                     #call_seq='random',
@@ -623,8 +545,6 @@ if __name__ == '__main__':
                     freq='D',
                     init_cash=1000000,
                     group_by=group_by_ids, # 按参数组合分组计算
-                    #accumulate = True,
-                    #direction='longonly'
                 )
                  
                 if s_str == '2024-01-02':
@@ -635,24 +555,17 @@ if __name__ == '__main__':
                     del batch_trades
         
                 # 收集多维度指标 
-                debug_compare(pf, n_time, batch_size)
-                batch_score = get_score(pf)
-                batch_score_njit = get_score_njit(pf, n_time, batch_size)
+                #batch_score = get_score(pf)
+                batch_score = get_score_njit(pf, n_time, batch_size)
                 #batch_score = get_score_single(pf)
                 batch_score.index = pd.MultiIndex.from_tuples(
                     [combo_batch[i] for i in batch_score.index], 
                     names=param_names
                 )
-                batch_score_njit.index = pd.MultiIndex.from_tuples(
-                    [combo_batch[i] for i in batch_score_njit.index], 
-                    names=param_names
-                )
-
                 window_scores.append(batch_score)
-                
-                
+                          
                 #显示清理内存
-                del pf, entries_np,exits_np, ma_conv_tile, s_ma_tile, l_ma_tile
+                del pf, entries_np,exits_np, ma_conv_tile, l_ma_tile
                 gc.collect()
 
             if (end_dt - e_dt).days < 30: break
@@ -695,7 +608,7 @@ if __name__ == '__main__':
         
         for i, (params, row) in enumerate(top_3.iterrows()):
             cv, ct, vg, k_atr, s, m, l = params
-            print(f"【Top {i+1}】 参数: CV_{cv} | CT_{ct} | VG_{vg} | MA({s},{m},{l})")
+            print(f"【Top {i+1}】 参数: CV_{cv} | CT_{ct} | VG_{vg} | ATR_{k_atr} | MA({s},{m},{l})")
             print(f" 综合得分: {row['score']:.4f} (稳定性参考: {row['stability_score']:.4f})")
             print(f" 收益表现: 年化收益={row['ann_ret']*100:.2f}% | 卡玛比率={row['calmar_avg']:.2f} | 夏普={row['sharpe']:.2f}")
             print(f" 交易质量: 胜率={row['win_rate']*100:.2f}%")

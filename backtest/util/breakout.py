@@ -73,7 +73,7 @@ def fast_score_kernel(value_arr, init_cash_arr):
     return ann_rets, max_dds, dd_dur_days, sharpe_ratios, final_values
 
 @njit(parallel=True, fastmath=True)
-def breakout_strategy(close, high, atr, volume_s, volume_l, pct_chg, ma_conv, s_ma, l_ma, cv_w, ct, vg, k_atr, n_3d):
+def breakout_strategy(close, high, atr, volume_s, volume_l, pct_chg, ma_conv, l_ma, cv_w, ct, vg, k_atr, n_3d):
     n_time, n_total_cols, n_symbols = n_3d
     entries = np.zeros((n_time, n_total_cols), dtype=np.bool_)
     exits = np.zeros((n_time, n_total_cols), dtype=np.bool_)
@@ -89,8 +89,6 @@ def breakout_strategy(close, high, atr, volume_s, volume_l, pct_chg, ma_conv, s_
         in_position = False
         highest_price = 0.0
         trailing_stop = 0.0
-        PnL = 0.0
-        entry_price = 0.0
 
         # 内部循环会被 Numba 的 fastmath 和 SIMD 优化得极快
         for t in range(0, n_time):
