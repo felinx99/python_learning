@@ -33,13 +33,7 @@ import json
 from collections import Counter
 
 import backtrader as bt
-
-
-#DATA_PATH = 'E:\\datas\\tdx\\1m_2025'
-DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
-RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\tmp'
-VOLATILITY_PCT = 0.13  # 波动性百分比阈值。用小数表示百分比。
-BOX_PERIOD = 45  # 计算波动性的周期长度，单位为交易日。
+from common import CONFIG, DATAFRAME
 
 class VolumeLong(bt.Observer):
     alias = ('VolumeL',)
@@ -94,7 +88,7 @@ def add_data(cerebro=None, **kwargs):
         # Set up data feed
         for ticker, listdate in tickers:
             
-            tickerpath = os.path.join(DATA_PATH, f'{ticker}.csv')
+            tickerpath = os.path.join(CONFIG.tdx_data_path[DATAFRAME.DAY], f'{ticker}.csv')
             data = bt.feeds.stockCSVData(
                 name = ticker,
                 dataname=tickerpath,
@@ -118,58 +112,58 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
     #combo_file={'1-combo':set(), '2-combo':set(), '3-combo':set(), '4-combo':set(), '5-combo':set()}
     
     # process newone
-    self.spot_filepath = os.path.join(RESULT_PATH, f'spot_{dtstr}.txt')
+    self.spot_filepath = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'spot_{dtstr}.txt')
     with open(self.spot_filepath, 'w') as f:
         f.write('\n'.join(spot_list))
     
     self.spot_filelist.append(f'spot_{dtstr}.txt')
 
     # make diff between newone and previous
-    # self.diff_filepath = os.path.join(RESULT_PATH, f'diff_{dtstr}.txt')
+    # self.diff_filepath = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'diff_{dtstr}.txt')
     oldset = set()
     newset = set(spot_list)
     #combo_file['1-combo'] = newset
     combo_file = newset
 
     if len(self.spot_filelist) >= 7:   #1连             
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[-2]), 'r') as f1:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-2]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         #deal with combo
         combo_file = oldset & combo_file
 
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[-3]), 'r') as f1:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-3]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
     
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[-4]), 'r') as f1:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-4]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[-5]), 'r') as f1:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-5]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[-6]), 'r') as f1:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-6]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[-7]), 'r') as f1:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-7]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
         """
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[-8]), 'r') as f1:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-8]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[-9]), 'r') as f1:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-9]), 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = combo_file - oldset
         """
         
         # save combo file
         if combo_file:
-            self.combo_filepath = os.path.join(RESULT_PATH, f'combo_{dtstr}.txt')
+            self.combo_filepath = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'combo_{dtstr}.txt')
 
             combo_list = list(combo_file)
             try:
@@ -180,7 +174,7 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
 
     '''
     if combo_file:
-        self.combo_filepath = os.path.join(RESULT_PATH, f'combo_{dtstr}.txt')
+        self.combo_filepath = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'combo_{dtstr}.txt')
         self.combo_filelist.append(f'combo_{dtstr}.txt')
 
         target_keys = ['5-combo', '4-combo', '3-combo']
@@ -188,7 +182,7 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
 
         if len(self.combo_filelist) >= 2:
             try:
-                with open(os.path.join(RESULT_PATH, self.combo_filelist[-2]), 'r', encoding='utf-8-sig') as f1:
+                with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.combo_filelist[-2]), 'r', encoding='utf-8-sig') as f1:
                     oldcombo = json.load(f1)
             except Exception as e:
                 print(f"read combo file error: {e}")              
@@ -214,7 +208,7 @@ def judge_uptrend_most(self):
     spotUnionList = []
     for idx, spotfile in enumerate(self.spot_filelist):
         idx_r = -(idx+1)
-        with open(os.path.join(RESULT_PATH, self.spot_filelist[idx_r]), 'r') as fr:
+        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[idx_r]), 'r') as fr:
                 curList = fr.read().splitlines()
         if idx == 0:
             spotUnionList = curList
@@ -227,25 +221,25 @@ def judge_uptrend_most(self):
             spotUnion20cur_sorted = spotUnion_counts.most_common()
             #spotUnion_sorted = [(element, count) for element, count in spotUnion_counts.most_common() if count > 10]
             spotUnion20cur_save = dict(spotUnion20cur_sorted)
-            spotUnion_fname = os.path.join(RESULT_PATH, f'most20_cur.txt')
+            spotUnion_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'most20_cur.txt')
             with open(spotUnion_fname, 'w', encoding='utf-8-sig') as fw:
                 json.dump(spotUnion20cur_save, fw, indent=4)
             #为统计最近1个月数据做准备
             spotUnion20cur_counter = Counter(spotUnion20cur_save)
 
-            up_fname = os.path.join(os.path.dirname(RESULT_PATH), f'most20_cur.txt')
+            up_fname = os.path.join(os.path.dirname(CONFIG.inferred_path['RESULT_PATH']), f'most20_cur.txt')
             shutil.copy(spotUnion_fname, up_fname)
 
         if idx==40:
             spotUnion_sorted = spotUnion_counts.most_common()
             #保存最近2个月连涨股票               
             spotUnion_save = dict(spotUnion_sorted)
-            spotUnion_fname = os.path.join(RESULT_PATH, f'most40.txt')
+            spotUnion_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'most40.txt')
 
             with open(spotUnion_fname, 'w', encoding='utf-8-sig') as fw:
                 json.dump(spotUnion_save, fw, indent=4)
 
-            up_fname = os.path.join(os.path.dirname(RESULT_PATH), f'most40.txt')
+            up_fname = os.path.join(os.path.dirname(CONFIG.inferred_path['RESULT_PATH']), f'most40.txt')
             shutil.copy(spotUnion_fname, up_fname)
 
         if idx == 21:
@@ -260,7 +254,7 @@ def judge_uptrend_most(self):
             #spotUnion_sorted = [(element, count) for element, count in spotUnion_counts.most_common() if count > 10]
             #spotUnion_counter20 = Counter(dict(spotUnion_sorted))
             spotUnion20pre_save = dict(spotUnion20pre_sorted)
-            spotUnion_fname = os.path.join(RESULT_PATH, f'most20_pre.txt')
+            spotUnion_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'most20_pre.txt')
             with open(spotUnion_fname, 'w', encoding='utf-8-sig') as fw:
                 json.dump(spotUnion20pre_save, fw, indent=4)
             #保存最近1个月新出现的连涨股票
@@ -278,11 +272,11 @@ def judge_uptrend_most(self):
             result_counter = Counter(result)
             result_sorted = result_counter.most_common()
             result_dict = dict(result_sorted)
-            spotUnion_new_fname = os.path.join(RESULT_PATH, f'most20_new.txt')
+            spotUnion_new_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'most20_new.txt')
             with open(spotUnion_new_fname, 'w', encoding='utf-8-sig') as fw:
                 json.dump(result_dict, fw, indent=4)
 
-            up_fname = os.path.join(os.path.dirname(RESULT_PATH), f'most20_new.txt')
+            up_fname = os.path.join(os.path.dirname(CONFIG.inferred_path['RESULT_PATH']), f'most20_new.txt')
             shutil.copy(spotUnion_new_fname, up_fname)
 
         if idx > 41:
@@ -323,11 +317,11 @@ def judge_boxbreakout(self, breakt=(), dtstr='', d=None, mid=0):
     curMid = (curhigh + curlow)/2
 
     if d.dynamicbox['consolidaDays'] == 0:
-        if curhigh > mid*(1+VOLATILITY_PCT) or curlow < mid*(1-VOLATILITY_PCT):
+        if curhigh > mid*(1+CONFIG.params['VOLATILITY_PCT']) or curlow < mid*(1-CONFIG.params['VOLATILITY_PCT']):
             pass
         else:
             set_box(box=d.dynamicbox, hl_tuple=(curhigh, curlow), date=dtstr, mode=1)
-    elif d.dynamicbox['consolidaDays'] < BOX_PERIOD/2.2:
+    elif d.dynamicbox['consolidaDays'] < CONFIG.params['BOX_PERIOD']/2.2:
         #BOX生成部分：继续生成或重新生成
         newboxh = max(d.dynamicbox['boxHigh'], curhigh)
         newboxl = min(d.dynamicbox['boxLow'], curlow)
@@ -341,11 +335,11 @@ def judge_boxbreakout(self, breakt=(), dtstr='', d=None, mid=0):
                 set_box(box=d.dynamicbox, hl_tuple=(curhigh, curlow), date=dtstr, mode=1)
                 return
         else:
-            if curhigh > mid*(1+VOLATILITY_PCT) or curlow < mid*(1-VOLATILITY_PCT): 
-                if curhigh > mid*(1+VOLATILITY_PCT):
-                    newboxh = mid*(1+VOLATILITY_PCT)
-                if curlow < mid*(1-VOLATILITY_PCT):
-                    newboxl = mid*(1-VOLATILITY_PCT)
+            if curhigh > mid*(1+CONFIG.params['VOLATILITY_PCT']) or curlow < mid*(1-CONFIG.params['VOLATILITY_PCT']): 
+                if curhigh > mid*(1+CONFIG.params['VOLATILITY_PCT']):
+                    newboxh = mid*(1+CONFIG.params['VOLATILITY_PCT'])
+                if curlow < mid*(1-CONFIG.params['VOLATILITY_PCT']):
+                    newboxl = mid*(1-CONFIG.params['VOLATILITY_PCT'])
                 
                 set_box(box=d.dynamicbox, hl_tuple=(newboxh, newboxl), date=dtstr, mode=2)
             else:
@@ -354,10 +348,10 @@ def judge_boxbreakout(self, breakt=(), dtstr='', d=None, mid=0):
         record = {'stock':'', 'box':{}}
         #突破部分
         if d.lines.close[0] > d.dynamicbox['boxHigh'] and curhigh > d.dynamicbox['boxMid']*1.1 :
-            #step1: Notify up breakout, 待补充相关代码and curhigh > d.dynamicbox['boxMid']*(1+VOLATILITY_PCT)
+            #step1: Notify up breakout, 待补充相关代码and curhigh > d.dynamicbox['boxMid']*(1+CONFIG.params['VOLATILITY_PCT'])
             #step2: save box data
             #step3: reset box       
-            if d.dynamicbox['consolidaDays'] > BOX_PERIOD:
+            if d.dynamicbox['consolidaDays'] > CONFIG.params['BOX_PERIOD']:
                 record['stock'] = d._name
                 record['box'] = d.dynamicbox.copy()
                 breakuplist.append(record)
@@ -387,7 +381,7 @@ def judge_boxbreakout(self, breakt=(), dtstr='', d=None, mid=0):
         newboxm = (newboxh + newboxl)/2
         newVolatility = (newboxh - newboxm)/newboxm
 
-        if newVolatility > VOLATILITY_PCT:            
+        if newVolatility > CONFIG.params['VOLATILITY_PCT']:            
             if d.dynamicbox['ThHit'] > 1:
                 #step2: save box data
                     #待补充相关代码
@@ -396,8 +390,8 @@ def judge_boxbreakout(self, breakt=(), dtstr='', d=None, mid=0):
                 set_box(box=d.dynamicbox, hl_tuple=(curhigh, curlow), date=dtstr, mode=1)
                 return
             else:
-                thup = newboxm*(1 + VOLATILITY_PCT)
-                thdown = newboxm*(1 - VOLATILITY_PCT)
+                thup = newboxm*(1 + CONFIG.params['VOLATILITY_PCT'])
+                thdown = newboxm*(1 - CONFIG.params['VOLATILITY_PCT'])
                 set_box(box=d.dynamicbox, hl_tuple=(thup, thdown), date=dtstr, mode=2)
         else:
             set_box(box=d.dynamicbox, hl_tuple=(newboxh, newboxl), date=dtstr, mode=3)
@@ -507,7 +501,7 @@ class SmaCross(bt.SignalStrategy):
             judge_uptrend(self, dtstr=dtstr, spot_list=spot_list)
         
         if vratio_list:
-            self.vratio_fname = os.path.join(RESULT_PATH, f'vratio_{dtstr}.txt')
+            self.vratio_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'vratio_{dtstr}.txt')
             with open(self.vratio_fname, 'w') as fw:
                 fw.write('\n'.join(vratio_list))
 
@@ -515,7 +509,7 @@ class SmaCross(bt.SignalStrategy):
         if boxbreakup:
             sortedbox = sorted(boxbreakup, key=lambda x: x['box']['consolidaDays'], reverse=True)
             sortedbox_list = [(item ['stock'], item['box']['consolidaDays'], item['box']['startdate'], item['box']['boxHigh'], item['box']['boxLow']) for item  in sortedbox]
-            self.box_fname = os.path.join(RESULT_PATH, f'boxup_{dtstr}.txt')
+            self.box_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'boxup_{dtstr}.txt')
             with open(self.box_fname, 'w') as f:
                 for item in sortedbox_list:
                     f.write(str(item) + '\n')
@@ -548,7 +542,7 @@ class SmaCross(bt.SignalStrategy):
         print('-------------     finished      --------------')
         print(f'total process: {len(self.datas)} datas')
 
-        delete_oldfiles(RESULT_PATH)
+        delete_oldfiles(CONFIG.inferred_path['RESULT_PATH'])
         print('old files deleted')
 
 
@@ -619,7 +613,7 @@ if __name__ == '__main__':
     if TICKERS:
         STRATEGY_ARGS['tickers'] = [ticker.strip() for ticker in TICKERS[0].split(',')]
     else:
-        csvpath = os.path.dirname(RESULT_PATH)
+        csvpath = os.path.dirname(CONFIG.inferred_path['RESULT_PATH'])
         TICKER_CSV_PATH = os.path.join(os.path.dirname(csvpath), 'stocklist.csv')
         assert os.path.exists(TICKER_CSV_PATH), f"Error: '{TICKER_CSV_PATH}'"
         TICKERS_DF = pd.read_csv(TICKER_CSV_PATH, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式

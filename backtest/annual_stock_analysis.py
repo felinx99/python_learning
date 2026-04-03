@@ -6,11 +6,8 @@ import psutil
 from multiprocessing import Pool
 from functools import partial
 from dataclasses import dataclass, fields, asdict
+from common import CONFIG, DATAFRAME
 
-
-# 设置数据路径
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\'
-STOCKDATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 TARGET_YEAR = 2025
 
 @dataclass
@@ -209,8 +206,8 @@ def analyze_stocks(stock_list=[], stockdata_path='', target_year=0, batch_size=1
     all_results_buffer = []
     header_written = False
 
-    output_filename = os.path.join(os.path.dirname(STOCKLIST_PATH), f"{target_year}_analysis.csv")
-    top300_filename = os.path.join(os.path.dirname(STOCKLIST_PATH), f"{target_year}_top300_analysis.csv")
+    output_filename = os.path.join(os.path.dirname(CONFIG.base_path['STOCK_OUTPUT_PATH']), f"{target_year}_analysis.csv")
+    top300_filename = os.path.join(os.path.dirname(CONFIG.base_path['STOCK_OUTPUT_PATH']), f"{target_year}_top300_analysis.csv")
 
     process_stockpartial = partial(process_stock, stockdata_path=stockdata_path, target_year=target_year)
     physical_cores = psutil.cpu_count(logical=False)
@@ -284,12 +281,12 @@ def _flush_to_csv(data_list, filename, has_header):
 # 使用示例
 # ==========================================
 if __name__ == "__main__":
-    STOCKLIST_FILE = os.path.join(os.path.dirname(STOCKLIST_PATH), 'stocklist.csv')
+    STOCKLIST_FILE = os.path.join(os.path.dirname(CONFIG.base_path['STOCK_OUTPUT_PATH']), 'stocklist.csv')
     assert os.path.exists(STOCKLIST_FILE), f"Error: '{STOCKLIST_FILE}'"
     df_stocklist = pd.read_csv(STOCKLIST_FILE, usecols=[0], skiprows=1, header=None, dtype={0: str}) #read_csv返回的DF数据格式
     stocklist = df_stocklist[0].tolist()  # 转为 list 格式
     
     # 由于没有真实文件，运行下面这行会直接结束。
     # 请在实际环境中取消注释并传入真实的 stocklist
-    analyze_stocks(stocklist, STOCKDATA_PATH, TARGET_YEAR)
+    analyze_stocks(stocklist, CONFIG.tdx_data_path[DATAFRAME['DAY']], TARGET_YEAR)
 

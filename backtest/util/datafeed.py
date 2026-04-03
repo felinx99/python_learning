@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import sys
-sys.path.append('D:/new_tdx_test/PYPlugins/user')
+sys.path.append('D:/new_tdx/PYPlugins/user')
 from tqcenter import tq # type: ignore
 import tushare as ts
 import akshare as ak

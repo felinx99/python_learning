@@ -6,10 +6,8 @@ import numpy as np
 import time
 from datetime import datetime, timedelta
 from tqcenter import tq # type: ignore
+from common import CONFIG
 
-
-
-WATCHLIST_PATH = "E:\\output\\Astock\\stockpicking\\test.csv"  # 周日扫描出的潜力股池
 
 def calculate_average_correlation_numpy(df):
     # 1. 将 DataFrame 转换为 NumPy 数组
@@ -87,7 +85,7 @@ stockprice_df = data_to_df(df_real)
 #转换为‘日期 股票代码’的收盘价宽表
 close_df = tq.price_df(df_real, 'Close')
 calc_MomentumTriggerStrategy(stockprice_df)
-stockprice_df.to_csv(WATCHLIST_PATH, sep=',', encoding='utf-8-sig', index=False, date_format='%Y-%m-%d', float_format='%.3f')
+stockprice_df.to_csv(CONFIG.inferred_path['WATCHLIST_PATH'], sep=',', encoding='utf-8-sig', index=False, date_format='%Y-%m-%d', float_format='%.3f')
 sector_list = tq.get_sector_list()
 print(sector_list)
 

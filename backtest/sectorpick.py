@@ -5,14 +5,10 @@ import pyarrow.parquet as pq
 import talib as ta
 from scipy.stats import linregress
 from numpy.lib.stride_tricks import sliding_window_view
+from common import CONFIG
 
 from pathlib import Path
 from .util import datafeed
-
-SECTOR_PATH = 'E:\\datas\\tdx\\sector'
-SLOPE_THRESHOLD = 6.5
-SLOPE_WINDOWS= 5
-
 class Sector:
     sector_type = {
         'self' : 'SECTOR_SELF', #自选股
@@ -38,7 +34,7 @@ class Sector:
 
     @classmethod
     def calc_ols(cls, df=None, column='', method=''):
-        windows_len = SLOPE_WINDOWS
+        windows_len = CONFIG.params['SLOPE_WINDOWS']
         N = int(''.join(filter(str.isdigit, method)))
         # 提取数据,并价格转换为对数值，对数体现价格的等比变化程序
         method_df = ta.SMA(df[column].values.astype('float64'), timeperiod=N)
@@ -106,9 +102,9 @@ class Sector:
         sma20_df,sma20_slope_df = Sector.calc_ols(df=df, column='ohlc', method='sma20')
         df['avg_slope'] = 0.4*sma5_slope_df + 0.2*sma10_slope_df + 0.4*sma20_slope_df
         weight = Sector.calc_R(df, column='ohlc', window=5)
-        #筛选条件 df['avg_slope'] > SLOPE_THRESHOLD 权重大于2
+        #筛选条件 df['avg_slope'] > CONFIG.params['SLOPE_THRESHOLD'] 权重大于2
         #k=0.02,R2=0.4,a=15*R2, threshold = np.degress(np.arctan(a*k)
-        slect_res_df = (np.degrees(np.arctan(15 * weight * df['avg_slope']))   > SLOPE_THRESHOLD) & (sma20_slope_df > 0.001)
+        slect_res_df = (np.degrees(np.arctan(15 * weight * df['avg_slope']))   > CONFIG.params['SLOPE_THRESHOLD']) & (sma20_slope_df > 0.001)
 
         return slect_res_df
 
@@ -120,14 +116,14 @@ class Sector:
         daily_treandup_sector_df = None
 
         for sector in sectorlist:
-            sectorlistpath = Path(SECTOR_PATH)/sector/f"{sector}_list.csv"
+            sectorlistpath = CONFIG.inferred_path['TDX_SECTOR_PATH']/sector/f"{sector}_list.csv"
             sectorlist_df = pd.read_csv(sectorlistpath, skiprows=1, header=None)
             for _, sector_code in sectorlist_df.iterrows():
                 symbol = f"{sector_code[0]}"
                 sectorlist = self.get_list_in_sector(symbol)
                 if len(sectorlist) < 6:
                     continue
-                sector_file = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}.csv"
+                sector_file = CONFIG.inferred_path['TDX_SECTOR_PATH']/sector/'daily'/f"{symbol}.csv"
                 sector_df = pd.read_csv(sector_file, dtype=self.stock_csvtype, parse_dates=['date'])
                 sector_df['ohlc'] = sector_df.eval('(high + 2*open + 2*close + low) / 6')
                 sector_df['symbol'] = symbol
@@ -142,18 +138,18 @@ class Sector:
         df_result = pd.concat(df_list , ignore_index=True)
         df_result = df_result.sort_values(['date', 'avg_slope'], ascending=False)
 
-        pb_path = Path(SECTOR_PATH) /'trendup_sectors_everydaily.parquet'
+        pb_path = CONFIG.inferred_path['TDX_SECTOR_PATH']/'trendup_sectors_everydaily.parquet'
         table = pa.Table.from_pandas(df_result)
         
         with pq.ParquetWriter(pb_path, table.schema, compression='snappy') as writer:
             writer.write_table(table)
 
         for daily_date, group in df_result.groupby('date'):
-            file_path = Path(SECTOR_PATH)/'daily'/f"trendup_{daily_date.strftime('%Y-%m-%d')}.csv"
+            file_path = CONFIG.inferred_path['TDX_SECTOR_PATH']/'daily'/f"trendup_{daily_date.strftime('%Y-%m-%d')}.csv"
             daily_treandup_sector_df = group[['symbol','name', 'avg_slope']].sort_values('avg_slope', ascending=False)
             daily_treandup_sector_df.to_csv(file_path, sep=',', encoding='utf-8-sig', index=False, date_format='%Y-%m-%d', float_format='%.3f')
 
-        sector_filepath = Path(SECTOR_PATH)/f"trendup_secotr_today.txt"
+        sector_filepath = CONFIG.inferred_path['TDX_SECTOR_PATH']/f"trendup_secotr_today.txt"
         sector_list = list(daily_treandup_sector_df['symbol'])
         #sectorname_list = list(daily_treandup_sector_df['name'])
         

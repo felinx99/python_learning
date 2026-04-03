@@ -22,18 +22,27 @@ dependencies = [
     "vectorbt @ git+ssh://git@github.com/felinx99/vectorbt.git",
     "pyarrow (>=23.0.1,<24.0.0)",
     "seaborn (>=0.13.2,<0.14.0)",
+    "numba (>=0.65.0,<0.66.0)",
 ]
+
+[tool.poetry]
 package-mode = false
 
+[tool.poetry.dependencies]
+# 使用相对路径指向旁边的项目
+backtrader = { path = "../backtrader", develop = true }
+common = { path = "../common", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-# 使用相对路径指向旁边的项目
-backtrader = { path = "../backtrader", editable = true }
-
 [dependency-groups]
 dev = [
     "ruff (>=0.15.4,<0.16.0)"
 ]
+
+[[tool.poetry.source]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+priority = "primary"

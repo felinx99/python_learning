@@ -16,70 +16,14 @@ from pytdx.reader import TdxDailyBarReader, TdxLCMinBarReader, TdxFileNotFoundEx
 from api.timeprofile import TimeProfile
 from backtest.util import datafeed
 
+from common import CONFIG, DATAFRAME
 
-DATA_SRCPATH = 'D:\\new_tdx\\vipdoc'
-PERIOD = ['lday', 'fzline', 'minline'] #日线，5分钟，1分钟
-EXCHANGE = ['sh', 'sz', 'bj']
-
-SECTOR_PATH = 'E:\\datas\\tdx\\sector'
-
-SHORT = 5
-MID = 10
-LONG =20
-class DATAFRAME(IntEnum):
-    DAY = 0
-    MINUTE5 = 1
-    MINUTE1 = 2
-
-src_dir = {
-    DATAFRAME.DAY: 'lday',
-    DATAFRAME.MINUTE5: 'fzline',
-    DATAFRAME.MINUTE1: 'minline',
-}
-
-file_extension = {
-    DATAFRAME.DAY: '*.day',
-    DATAFRAME.MINUTE5: '*.lc5',
-    DATAFRAME.MINUTE1: '*.lc1',
-}
-
-dst_dir = {
-    DATAFRAME.DAY: 'E:\\datas\\tdx\\day_2018_2025',
-    DATAFRAME.MINUTE5: 'E:\\datas\\tdx\\5m_2025',
-    DATAFRAME.MINUTE1: 'E:\\datas\\tdx\\1m_2025',
-}
-
-data_frame = [DATAFRAME.DAY, DATAFRAME.MINUTE5, DATAFRAME.MINUTE1]
-
-date_fmt = {
-    DATAFRAME.DAY: '%Y-%m-%d',
-    DATAFRAME.MINUTE5: '%Y-%m-%d %H:%M',
-    DATAFRAME.MINUTE1: '%Y-%m-%d %H:%M',
-}
-
-stock_csvtype = {
-    'open': 'float32',
-    'high': 'float32',
-    'low': 'float32',
-    'close': 'float32',
-    'volume': 'float64',
-}
-
-sector_type = {
-    'self' : 'SECTOR_SELF', #自选股
-    'hold' : 'SECTOR_HOLD', #持仓股
-    'all' : 'SECTOR_ALL',   #所有A股
-    'concept' : 'SECTOR_CONCEPT',   #概念板块
-    'l1' : 'SECTOR_L1',  #行业一级
-    'l2' : 'SECTOR_L2',
-    'l3' : 'SECTOR_L3'
-}
 
 def prepare_date(df=None):
     method = 'sma'
-    method_short = f'{method}{SHORT}'
-    method_mid = f'{method}{MID}'
-    method_long = f'{method}{LONG}'
+    method_short = f'{method}{CONFIG.SHORT}'
+    method_mid = f'{method}{CONFIG.MID}'
+    method_long = f'{method}{CONFIG.LONG}'
 
     df['ohlc'] = df.eval('(high + 2*open + 2*close + low) / 6')
     #calc_ols(df=df, column='ohlc', method=method_short)                
@@ -89,7 +33,7 @@ def prepare_date(df=None):
     return df
 
 def save_csvfile(path=None, data=None, period=None):
-    datefmt = date_fmt[period]
+    datefmt = CONFIG.date_fmt[period]
     
     if not path.exists():
         data['date'] = data['date'].astype('datetime64[s]')
@@ -97,7 +41,7 @@ def save_csvfile(path=None, data=None, period=None):
         return data
     else:
         try:
-            df_dst = pd.read_csv(path, dtype=stock_csvtype, parse_dates=['date'])
+            df_dst = pd.read_csv(path, dtype=CONFIG.stock_csvtype, parse_dates=['date'])
         except Exception as e:
             return None
 
@@ -124,7 +68,7 @@ def read_tdx_files(args):
         return None
     
     symbol = f"{srcfile.stem[2:]}.{srcfile.stem[:2].upper()}"
-    dstfile = Path(dst_dir[dateframe]) / f"{symbol}.csv"
+    dstfile = Path(CONFIG.tdx_data_path[dateframe]) / f"{symbol}.csv"
 
     # 转换处理
     df_src = df_src.drop('amount', axis=1)
@@ -139,9 +83,9 @@ def read_tdx_files(args):
 def download_stock():
     task_filelist = []
 
-    for exchange, dateframe in itertools.product(EXCHANGE, data_frame):
-        directory = Path(DATA_SRCPATH)/exchange/src_dir[dateframe]  
-        new_filelist = [(p, dateframe) for p in directory.glob(file_extension[dateframe])]
+    for exchange, dateframe in itertools.product(CONFIG.EXCHANGE, DATAFRAME):
+        directory = CONFIG.inferred_path['TDX_INSTALL_DATADIR']/exchange/CONFIG.src_dir[dateframe]  
+        new_filelist = [(p, dateframe) for p in directory.glob(CONFIG.file_extension[dateframe])]
         task_filelist.extend(new_filelist)
 
     #获取物理核心数，多进程处理
@@ -162,10 +106,10 @@ def download_stock():
     #将pb_data写入Parquet
     if pb_data:
         final_df = pd.concat(pb_data, ignore_index=True)
-        for col, dtype in stock_csvtype.items():
+        for col, dtype in CONFIG.stock_csvtype.items():
             final_df[col] = final_df[col].astype(dtype)
         
-        pb_path = Path(dst_dir[DATAFRAME.DAY]) /'all_stock_daily.parquet'
+        pb_path = Path(CONFIG.tdx_data_path[DATAFRAME.DAY]) /'all_stock_daily.parquet'
         header = not Path(pb_path).exists()
         table = pa.Table.from_pandas(final_df)
         
@@ -182,7 +126,7 @@ def download_sector_list(datafeed=None, listfile=None, sector=None):
             downloadsignal = True
 
     if downloadsignal:
-        sector_list_df = datafeed.get_sector_list(sector_type=sector_type[sector])
+        sector_list_df = datafeed.get_sector_list(sector_type=CONFIG.sector_type[sector])
         sector_list_df.to_csv(listfile, index=False, encoding='utf-8-sig')
 
 def download_sector_daily(datafeed=None, listfile=None, sector=None):
@@ -195,7 +139,7 @@ def download_sector_daily(datafeed=None, listfile=None, sector=None):
 
     for _, sector_code in sector_list_df.iterrows():
         symbol = f"{sector_code[0]}"
-        dstfile = Path(SECTOR_PATH)/sector/'daily'/f"{symbol}.csv"
+        dstfile = CONFIG.inferred_path['TDX_SECTOR_PATH']/sector/'daily'/f"{symbol}.csv"
 
         if dstfile.exists():
             #如果文件存在，仅下载最近5天数据
@@ -227,7 +171,7 @@ def download_sector(sectorlist=[]):
     pb_data = []
 
     for sector in sectorlist:
-        sectorfile = Path(SECTOR_PATH)/sector/f"{sector}_list.csv"
+        sectorfile = CONFIG.inferred_path['TDX_SECTOR_PATH']/sector/f"{sector}_list.csv"
         download_sector_list(datafeed=feed, listfile=sectorfile, sector=sector)
         res = download_sector_daily(datafeed=feed, listfile=sectorfile, sector=sector)
         if len(res) > 0:
@@ -235,10 +179,10 @@ def download_sector(sectorlist=[]):
 
     if pb_data:
         final_df = pd.concat(pb_data, ignore_index=True)
-        for col, dtype in stock_csvtype.items():
+        for col, dtype in CONFIG.stock_csvtype.items():
             final_df[col] = final_df[col].astype(dtype)
         
-        pb_path = Path(SECTOR_PATH) /'all_sector_dailys.parquet'
+        pb_path = CONFIG.inferred_path['TDX_SECTOR_PATH'] /'all_sector_dailys.parquet'
         table = pa.Table.from_pandas(final_df)
         
         with pq.ParquetWriter(pb_path, table.schema, compression='snappy') as writer:
@@ -246,7 +190,7 @@ def download_sector(sectorlist=[]):
 
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser()
-    PARSER.add_argument('-f', '--fpath', required=True)
+    #PARSER.add_argument('-f', '--fpath', required=True)
     PARSER.add_argument('-s', '--start', required=False, default=20250101, type=int,
                         help='start date for a stock, format is YYYYMMDD')
     PARSER.add_argument('-e', '--end', required=False, default=0, type=int,
@@ -265,9 +209,13 @@ if __name__ == '__main__':
     ARG_ITEMS = vars(ARGS)
     
      
-    filepath = Path(ARG_ITEMS['fpath'])
-    TICKERLIST_PATH_SRC = Path(ARG_ITEMS['fpath'])/'stocklist_all.csv'
-    TICKERLIST_PATH_DEST = Path(ARG_ITEMS['fpath'])/'stocklist.csv'
+    #filepath = Path(ARG_ITEMS['fpath'])
+    #TICKERLIST_PATH_SRC = Path(ARG_ITEMS['fpath'])/'stocklist_all.csv'
+    #TICKERLIST_PATH_DEST = Path(ARG_ITEMS['fpath'])/'stocklist.csv'
+
+    TICKERLIST_PATH_SRC = CONFIG.base_path['TDX_DATA_PATH']/'stocklist_all.csv'
+    TICKERLIST_PATH_DEST = CONFIG.base_path['TDX_DATA_PATH']/'stocklist.csv'
+
 
     assert TICKERLIST_PATH_SRC.exists(), f"Error: '{TICKERLIST_PATH_SRC}'"
     

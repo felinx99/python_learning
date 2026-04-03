@@ -4,6 +4,10 @@
     //每次打开终端时自动激活该环境
     //"python.terminal.activateEnvInSelectedTerminal": true,
     //"terminal.integrated.environmentChangesRelaunch": true,
+    "python.analysis.extraPaths": [
+        "F:/gitcode",
+        "D:/new_tdx/PYPlugins/user"
+    ],
     //隐藏指定目录
     "files.exclude": {
         "**/.venv": true,
@@ -17,5 +21,6 @@
         "**/.github": true,
         "**/__pycache__": true,
         "**/.pytest_cache": true
-    }
+    },
+    "python.analysis.autoImportCompletions": true
 }

@@ -8,17 +8,12 @@ from scipy.stats import linregress
 from zmq import IntEnum
 from .util import datafeed
 from .sectorpick import Sector
+from common import CONFIG,DATAFRAME
 
-RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\tmp'
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test.csv'
-DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
-START_DATE = '20251024' 
-END_DATE = '20260106' 
-TARGET_BLOCK_NAME = 'ZFXG'  
 
-date_fmt = {
-    'DAY': '%Y%m%d',
-}
+START_DATE = '2025-10-24' 
+END_DATE = '2026-01-06' 
+
 
 # ================= 每周任务 =================
 #配置参数
@@ -32,8 +27,8 @@ CHANGE_WINDOW = 10          # 计算 RPS 变动的时间窗口 (10个交易日)
 
 class DfIndicators:
     def __init__(self, period=400):
-        self.today = datetime.now().strftime(date_fmt['DAY'])
-        self.start_date = pd.to_datetime(START_DATE, format=date_fmt['DAY'])
+        self.today = datetime.now().strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+        self.start_date = pd.to_datetime(START_DATE, format=CONFIG.date_fmt[DATAFRAME['DAY']])
 
     def cal_r2(self, series):
         """计算价格对数回归的 R2 (平稳度)"""
@@ -81,8 +76,8 @@ class DfIndicators:
         # 1. 获取申万一级行业列表
         sw_index_list = self.data.get_sector_list(sector_type='SECTOR_L1')
         
-        end_date = datetime.now().strftime(date_fmt['DAY'])
-        start_date = (datetime.now() - timedelta(days=250)).strftime(date_fmt['DAY'])
+        end_date = datetime.now().strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+        start_date = (datetime.now() - timedelta(days=250)).strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
         
         sector_data = []
         
@@ -145,8 +140,8 @@ class DfIndicators:
 
 class WeeklyScanner:
     def __init__(self, datafeed=None, indicator=None):
-        self.today = datetime.now().strftime(date_fmt['DAY'])
-        self.start_date = pd.to_datetime(START_DATE, format=date_fmt['DAY'])
+        self.today = datetime.now().strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+        self.start_date = pd.to_datetime(START_DATE, format=CONFIG.date_fmt[DATAFRAME['DAY']])
         self.data = datafeed
         self.calc = indicator
 
@@ -159,8 +154,8 @@ class WeeklyScanner:
         # 1. 获取申万一级行业列表
         sw_index_list = self.data.get_sector_list(sector_type='SECTOR_L1')
                 
-        end_date = datetime.now().strftime(date_fmt['DAY'])
-        start_date = (datetime.now() - timedelta(days=250)).strftime(date_fmt['DAY'])
+        end_date = datetime.now().strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+        start_date = (datetime.now() - timedelta(days=250)).strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
         
         sector_data = []
         
@@ -210,8 +205,8 @@ class WeeklyScanner:
         sw_index_list = self.data.get_sector_list(sector_type='SECTOR_L1')
          
         sector_results = []
-        end_date = datetime.now().strftime(date_fmt['DAY'])
-        start_date = (datetime.now() - timedelta(days=120)).strftime(date_fmt['DAY'])
+        end_date = datetime.now().strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+        start_date = (datetime.now() - timedelta(days=120)).strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
 
         for _, row in sw_index_list.iterrows():
             try:
@@ -232,8 +227,8 @@ class WeeklyScanner:
         concept_board_df = self.data.get_sector_list(sector_type='SECTOR_CONCEPT')
 
         sector_results = []
-        end_date = datetime.now().strftime(date_fmt['DAY'])
-        start_date = (datetime.now() - timedelta(days=120)).strftime(date_fmt['DAY'])
+        end_date = datetime.now().strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+        start_date = (datetime.now() - timedelta(days=120)).strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
         
         for _, row in concept_board_df.iterrows():
             try:
@@ -328,7 +323,7 @@ class WeeklyScanner:
             final_df.to_csv(WATCHLIST_PATH, index=False, encoding='utf-8-sig')
             stock_list = final_df['stock_code'].astype(str).tolist()
             
-            self.data.update_block(block_name=TARGET_BLOCK_NAME, stock_list=stock_list)
+            self.data.update_block(block_name=CONFIG.TARGET_BLOCK_NAME, stock_list=stock_list)
             print(f"--- 扫描完成！共锁定 {len(final_df)} 只高质量种子股，已更新 my_watchlist.csv ---")
         else:
             print("--- 扫描结束，未找到符合条件的个股 ---")
@@ -345,8 +340,8 @@ ATR_WINDOW = 10         # ATR计算窗口：14天
 
 class TrendStrategyTerm:
     def __init__(self, datafeed=None, indicator=None):
-        self.today = datetime.now().strftime(date_fmt['DAY'])
-        self.start_date = pd.to_datetime(START_DATE, format=date_fmt['DAY'])
+        self.today = datetime.now().strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+        self.start_date = pd.to_datetime(START_DATE, format=CONFIG.date_fmt[DATAFRAME['DAY']])
         self.output_file = f"{self.today}_report.txt"
         self.data = datafeed
         self.calc = indicator
@@ -536,8 +531,8 @@ class TrendStrategyTerm:
         rps_signal = False
         # 计算个股相对于板块的RPS评分
         # 1. 获取板块指数数据（示意，实际应缓存或批量获取）
-        start_date = pd.to_datetime(df['date'].iloc[0]).strftime(date_fmt['DAY'])
-        end_date = pd.to_datetime(df['date'].iloc[-1]).strftime(date_fmt['DAY'])
+        start_date = pd.to_datetime(df['date'].iloc[0]).strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+        end_date = pd.to_datetime(df['date'].iloc[-1]).strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
         sector_df = self.data.get_daily(symbol=sector, start_date=start_date, end_date=end_date)
         # 2. 计算RPS评分
         rps_score = self.calculate_relative_strength(df, sector_df)
@@ -645,8 +640,8 @@ class TrendStrategyTerm:
         try:
             watchlist = pd.read_csv(WATCHLIST_PATH)
             signal_list = []
-            end_date = datetime.now().strftime(date_fmt['DAY'])
-            start_date = (datetime.now() - timedelta(days=350)).strftime(date_fmt['DAY'])
+            end_date = datetime.now().strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+            start_date = (datetime.now() - timedelta(days=350)).strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
 
             for _, row in watchlist.iterrows():
                 code = str(row['stock_code'].zfill(6))
@@ -715,7 +710,7 @@ class TrendStrategyTerm:
         try:
             signal_list = []
             tdx_stocklist = []
-            srcpath = Path(DATA_PATH)/'all_stock_daily.parquet'
+            srcpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
 
             try:
                 full_df = pd.read_parquet(srcpath, engine='pyarrow')
@@ -836,8 +831,8 @@ class TrendStrategyTerm:
         # --- 保存为 CSV ---
         if signal_list:
             result_df = pd.DataFrame(signal_list)
-            self.output_csv = Path(RESULT_PATH)/'auto_select'/f"breakout_{self.today}.csv"
-            result_df.to_csv(self.output_csv, encoding='utf-8-sig', index=False, date_format=date_fmt['DAY'], float_format='%.2f') 
+            self.output_csv = CONFIG.inferred_path['AISTOCKPICK_RESULT_PATH']/f"breakout_{self.today}.csv"
+            result_df.to_csv(self.output_csv, encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f') 
             self.data.update_block(block_code='BKXG', stock_list=tdx_stocklist)
             print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
         else:
