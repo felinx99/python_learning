@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-import os
 import psutil
 
 from multiprocessing import Pool
@@ -167,9 +166,9 @@ def process_stock(stock_name, stockdata_path):
     单个股票的处理函数，供进程池调用
     """   
     try:
-        file_path = os.path.join(stockdata_path, f'{stock_name}.csv')
+        file_path = stockdata_path/f'{stock_name}.csv'
         # 1. 检查文件是否存在
-        if not os.path.exists(file_path):
+        if not file_path.exists():
             return None
 
         # 2. 读取数据 (指定列名以防万一，优化类型)
@@ -284,7 +283,7 @@ def _flush_to_csv(data_list, filename, has_header):
 # ==========================================
 if __name__ == "__main__":
     STOCKLIST_FILE = CONFIG.base_path['STOCK_OUTPUT_PATH']/'stocklist.csv'
-    assert os.path.exists(STOCKLIST_FILE), f"Error: '{STOCKLIST_FILE}'"
+    assert STOCKLIST_FILE.exists(), f"Error: '{STOCKLIST_FILE}'"
     df_stocklist = pd.read_csv(STOCKLIST_FILE, usecols=[0], skiprows=1, header=None, dtype={0: str}) #read_csv返回的DF数据格式
     stocklist = df_stocklist[0].tolist()  # 转为 list 格式
     
