@@ -10,14 +10,15 @@ class StockPoolManager:
         self.OUTPUT_PATH = OUTPUT_PATH
         self.POOL_FILE = self.OUTPUT_PATH/"selection_pool.csv"
         self.DELETED_FILE = self.OUTPUT_PATH/"deleted_pool.csv"
-        assert self.POOL_FILE.exists(), f"Error: '{self.POOL_FILE}'"
-        assert self.DELETED_FILE.exists(), f"Error: '{self.DELETED_FILE}'"
-        
+
         self.selection_df = self._load_csv(self.POOL_FILE)
         self.deleted_df = self._load_csv(self.DELETED_FILE)
 
     def _load_csv(self, path):
-        return pd.read_csv(path, dtype={'ts_code': str})
+        if path.exists():
+            return pd.read_csv(path, dtype={'ts_code': str})
+        return pd.DataFrame()
+        
     
     def _save_csv(self):
         self.selection_df.to_csv(self.POOL_FILE, sep=',', encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f')
@@ -34,8 +35,8 @@ class StockPoolManager:
         now = datetime.now().strftime('%Y-%m-%d')
         
         for _, row in newstock_df.iterrows():
-            code = str(row['code']).zfill(6)
-            name = row['name']
+            code = row['Code']
+            name = row['Name']
             
             # 1. 查重处理
             if not self.selection_df.empty and code in self.selection_df['ts_code'].values:

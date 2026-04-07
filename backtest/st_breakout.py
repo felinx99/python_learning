@@ -708,10 +708,10 @@ class TrendStrategyTerm:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
     def daily_monitor_breakout(self, stocklist_df=None, converged_windwos=4, converged_threshold=2.5, vol_gain=1.5):        
         # A. 监测潜力池 (入场信号)
+        stockpool = StockPoolManager()
+        signal_list = []
+        tdx_stocklist = []
         try:
-            stockpool = StockPoolManager()
-            signal_list = []
-            tdx_stocklist = []
             srcpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
 
             try:
@@ -810,9 +810,9 @@ class TrendStrategyTerm:
                     
                     # 汇总所有关键信息
                     signal_data = {
-                        "日期": self.today,
-                        "代码": row['Code'],
-                        "名称": row['Name'],
+                        "Date": self.today,
+                        "Code": row['Code'],
+                        "Name": row['Name'],
                         "现价": round(curr_price, 2),
                         "止损位": round(stop_loss, 2),
                         "风险空间(%)": round(((curr_price - stop_loss) / curr_price) * 100, 2),
@@ -837,7 +837,7 @@ class TrendStrategyTerm:
             result_df.to_csv(self.output_csv, encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f') 
             self.data.update_block(block_code='BKXG', stock_list=tdx_stocklist)
             print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
-            stockpool.add_to_pool(result_df, type="点火突破")
+            stockpool.add_to_pool(newstock_df=result_df, strategy_name="点火突破")
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
 
@@ -856,8 +856,8 @@ if __name__ == "__main__":
 
 
     
-    sectors_list = mysector.get_up_sector(sectorlist=['concept', 'l3'], ret='today')
-    mysector.update_sector(block_code='ZFBK', update_list=sectors_list)
+    sectors_list = mysector.get_up_sector(sectorlist=['concept'], ret='today')
+    #mysector.update_sector(block_code='ZFBK', update_list=sectors_list)
 
 
     stocklist_df = mysector.get_list_in_sector(sectorlist=sectors_list)
