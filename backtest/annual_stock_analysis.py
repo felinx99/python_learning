@@ -8,7 +8,7 @@ from functools import partial
 from dataclasses import dataclass, fields, asdict
 from common import CONFIG, DATAFRAME
 
-TARGET_YEAR = 2025
+START_DATE = '2025-10-01'
 
 @dataclass
 class StockResult:
@@ -162,7 +162,7 @@ def calculate_metrics(df_year, stock_name):
         )
 
 
-def process_stock(stock_name, stockdata_path, target_year):
+def process_stock(stock_name, stockdata_path):
     """
     单个股票的处理函数，供进程池调用
     """   
@@ -183,13 +183,15 @@ def process_stock(stock_name, stockdata_path, target_year):
         df['date'] = pd.to_datetime(df['date']).astype('datetime64[s]')
         
         # 4. 筛选年份
-        df_year = df[df['date'].dt.year == target_year].sort_values('date').reset_index(drop=True)
+        threshold = pd.Timestamp(START_DATE)
+        filtered_df = df[df['date'] > threshold].sort_values('date').reset_index(drop=True)
+        #df_year = df[df['date'].dt.year == target_year].sort_values('date').reset_index(drop=True)
         
-        if df_year.empty:
+        if filtered_df.empty:
             return None
 
         # 5. 计算指标
-        result = calculate_metrics(df_year, stock_name)
+        result = calculate_metrics(filtered_df, stock_name)
         
         if result:
             result['stock_name'] = stock_name
@@ -201,15 +203,15 @@ def process_stock(stock_name, stockdata_path, target_year):
         print(f"Error processing {stock_name}: {e}") 
         return None
 
-def analyze_stocks(stock_list=[], stockdata_path='', target_year=0, batch_size=1000):
+def analyze_stocks(stock_list=[], stockdata_path='', target_year='', batch_size=1000):
     write_buffer = []
     all_results_buffer = []
     header_written = False
 
-    output_filename = os.path.join(os.path.dirname(CONFIG.base_path['STOCK_OUTPUT_PATH']), f"{target_year}_analysis.csv")
-    top300_filename = os.path.join(os.path.dirname(CONFIG.base_path['STOCK_OUTPUT_PATH']), f"{target_year}_top300_analysis.csv")
+    output_filename = CONFIG.base_path['STOCK_OUTPUT_PATH']/f"{target_year}_analysis.csv"
+    top300_filename = CONFIG.base_path['STOCK_OUTPUT_PATH']/f"{target_year}_top300_analysis.csv"
 
-    process_stockpartial = partial(process_stock, stockdata_path=stockdata_path, target_year=target_year)
+    process_stockpartial = partial(process_stock, stockdata_path=stockdata_path)
     physical_cores = psutil.cpu_count(logical=False)
     
     #for p in stock_list:
@@ -281,12 +283,12 @@ def _flush_to_csv(data_list, filename, has_header):
 # 使用示例
 # ==========================================
 if __name__ == "__main__":
-    STOCKLIST_FILE = os.path.join(os.path.dirname(CONFIG.base_path['STOCK_OUTPUT_PATH']), 'stocklist.csv')
+    STOCKLIST_FILE = CONFIG.base_path['STOCK_OUTPUT_PATH']/'stocklist.csv'
     assert os.path.exists(STOCKLIST_FILE), f"Error: '{STOCKLIST_FILE}'"
     df_stocklist = pd.read_csv(STOCKLIST_FILE, usecols=[0], skiprows=1, header=None, dtype={0: str}) #read_csv返回的DF数据格式
     stocklist = df_stocklist[0].tolist()  # 转为 list 格式
     
     # 由于没有真实文件，运行下面这行会直接结束。
     # 请在实际环境中取消注释并传入真实的 stocklist
-    analyze_stocks(stocklist, CONFIG.tdx_data_path[DATAFRAME['DAY']], TARGET_YEAR)
+    analyze_stocks(stocklist, CONFIG.tdx_data_path[DATAFRAME['DAY']], START_DATE)
 
