@@ -45,11 +45,11 @@
 
 
         {
-            "name": "backtest: A-stock",
+            "name": "backtest: boxtheory",
             "type": "debugpy",
             "console": "integratedTerminal",
             "request": "launch",
-            "module": "backtest.bt_stockpick",
+            "module": "backtest.st_boxtheory",
             "cwd": "${workspaceFolder}",
             "justMyCode": false,
     
@@ -68,11 +68,11 @@
         },
 
         {
-            "name": "backtest: sectorpick",
+            "name": "backtest: sectorresonance",
             "type": "debugpy",
             "console": "integratedTerminal",
             "request": "launch",
-            "module": "backtest.sectorpick",
+            "module": "backtest.st_sectorresonance",
             "cwd": "${workspaceFolder}",
             "justMyCode": false,
     
@@ -104,11 +104,11 @@
         },
 
         {
-            "name": "backtest: AI-stockpick",
+            "name": "backtest: breakout.py",
             "type": "debugpy",
             "console": "integratedTerminal",
             "request": "launch",
-            "module": "backtest.AIstrategy",
+            "module": "backtest.st_breakout",
             "cwd": "${workspaceFolder}",
             "justMyCode": false,
     

@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 from scipy.stats import linregress
 from zmq import IntEnum
 from .util import datafeed
-from .sectorpick import Sector
+from .st_sectorresonance import Sector
 from common import CONFIG,DATAFRAME
+from .stocklist import StockPoolManager
 
 
 START_DATE = '2025-10-24' 
@@ -708,6 +709,7 @@ class TrendStrategyTerm:
     def daily_monitor_breakout(self, stocklist_df=None, converged_windwos=4, converged_threshold=2.5, vol_gain=1.5):        
         # A. 监测潜力池 (入场信号)
         try:
+            stockpool = StockPoolManager()
             signal_list = []
             tdx_stocklist = []
             srcpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
@@ -835,6 +837,7 @@ class TrendStrategyTerm:
             result_df.to_csv(self.output_csv, encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f') 
             self.data.update_block(block_code='BKXG', stock_list=tdx_stocklist)
             print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
+            stockpool.add_to_pool(result_df, type="点火突破")
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
 
