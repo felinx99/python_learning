@@ -12,6 +12,7 @@ logs/
 back/
 .ipynb_checkpoints
 .pylintrc
+.env
 fast_arrow_auth.json
 
 # Ignore poetry files

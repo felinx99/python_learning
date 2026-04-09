@@ -1,5 +1,3 @@
-import sys
-sys.path.append('D:/new_tdx_test/PYPlugins/user')
 import pandas as pd
 import talib as ta
 import numpy as np
@@ -58,7 +56,66 @@ tq.initialize(__file__)
 #block_stocks = tq.get_stock_list_in_sector(block_code='881096.SH',list_type=1) #目标板块
 #print(f"total-{len(block_stocks)}: {block_stocks}")
 
+#myAccount = tq.stock_account(account="888806601242", account_type="STOCK")
+#print(myAccount)
+#stock_orders = tq.query_stock_orders(account_id=myAccount, stock_code="")
+#print(stock_orders)
+#stock_positions = tq.query_stock_positions(account_id=myAccount)
+#print(stock_positions)
 
+#stock_list = tq.get_stock_list('92', list_type=1)
+#print(stock_list)
+#print(len(stock_list))
+
+#block_stocks = tq.get_stock_list_in_sector('AP', block_type=2)
+#print(block_stocks)
+#print(len(block_stocks))
+
+#bk_data = tq.get_bkjy_value(stock_list=['880660.SH'],
+#         field_list=['BK5','BK6','BK7','BK8','BK9','BK10','BK11','BK12','BK13','BK14','BK15','BK16','BK17','BK18','BK19'],
+#         start_time='20260318',
+#         end_time='20260321')
+#print(bk_data)
+
+#gp_val = tq.get_gpjy_value(
+#        stock_list=['000001.SZ'],
+#        field_list=['GP1','GP2','GP3','GP4','GP5','GP6','GP7','GP8','GP9','GP11','GP12','GP13','GP17','GP18','GP25','GP31','GP32','GP37','GP42','GP44','GP45'],
+#        start_time='20260318',
+#        end_time='20260321')
+#print(gp_val)
+
+#more_info = tq.get_more_info(stock_code = '688318.SH', field_list=[])
+#print(more_info)
+
+stocklist = ['000935.SZ','600426.SH']
+stock = '000934.SZ'
+formula_set_res = tq.formula_set_data_info(stock_code=stock,stock_period='1d', count=499, dividend_type=1)
+#技术指标公式MACD
+formula_zb = tq.formula_zb(formula_name='L2定单分析', formula_arg='')
+print(f"{formula_zb['Data']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb['Data']['HUGE_LIMIT'])}")
+
+formula_set_res1 = tq.formula_set_data_info(stock_code=stock,stock_period='1d', count=0,start_time= '20240301', end_time='20260324', dividend_type=1)
+#技术指标公式MACD
+formula_zb1 = tq.formula_zb(formula_name='L2定单分析', formula_arg='')
+print(f"{formula_zb1['Data']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb1['Data']['HUGE_LIMIT'])}")
+
+formula_set_res2 = tq.formula_set_data_info(stock_code=stock,stock_period='1d', count=-1, dividend_type=1)
+#技术指标公式MACD
+formula_zb2 = tq.formula_zb(formula_name='L2定单分析', formula_arg='')
+print(f"{formula_zb2['Data']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb2['Data']['HUGE_LIMIT'])}")
+
+mul_zb_res = tq.formula_process_mul_zb(
+     formula_name='L2定单分析',
+     formula_arg='',
+     return_count=0,
+     return_date=False,
+     stock_list=['688318.SH'],
+     stock_period='1d',
+     start_time = '20260101',
+     end_time = '20260320',
+     count=0,
+     dividend_type=1)
+print(mul_zb_res)
 
 start_time = '20200101' #数据起始时间
 target_end = '' #datetime.now().strftime('%Y%m%d') #数据结束时间

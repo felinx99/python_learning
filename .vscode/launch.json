@@ -150,6 +150,16 @@
         },
 
         {
+            "name": "backtest: trendup_finder",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.trendup_model",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+
+        {
             "name": "backtest: annual_report",
             "type": "debugpy",
             "console": "integratedTerminal",

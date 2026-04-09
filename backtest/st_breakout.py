@@ -714,90 +714,90 @@ class TrendStrategyTerm:
         try:
             srcpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
 
-            try:
-                full_df = pd.read_parquet(srcpath, engine='pyarrow')
-            except Exception as e:
-                print(f'宽表读取失败：{e}')
+        try:
+            full_df = pd.read_parquet(srcpath, engine='pyarrow')
+        except Exception as e:
+            print(f'宽表读取失败：{e}')
 
-            for index, row in stocklist_df.iterrows():              
-                df = full_df[full_df['symbol']==row['Code']]
+        for index, row in stocklist_df.iterrows():              
+            df = full_df[full_df['symbol']==row['Code']]
 
-                if len(df) < 120: 
-                    continue
-                #condition_vcp  = df['vcp_signal'].iloc[-1].item(), 
-                #amp = df['vcp'].iloc[-1].item(), 
-                #pivot = df['pivot'].iloc[-1].item()
-                condition_vcp, amp, pivot = self.check_vcp(df)
+            if len(df) < 120: 
+                continue
+            #condition_vcp  = df['vcp_signal'].iloc[-1].item(), 
+            #amp = df['vcp'].iloc[-1].item(), 
+            #pivot = df['pivot'].iloc[-1].item()
+            condition_vcp, amp, pivot = self.check_vcp(df)
 
 
-                # 计算收敛度 (变异系数 CV)
-                df['sma5'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=5)
-                df['sma10'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=10)
-                df['sma20'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=20)
-                ma_cols = ['sma5', 'sma10', 'sma20']
-                df['converged'] = df[ma_cols].std(axis=1) / df[ma_cols].mean(axis=1) * 100
+            # 计算收敛度 (变异系数 CV)
+            df['sma5'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=5)
+            df['sma10'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=10)
+            df['sma20'] = ta.SMA(df['ohlc'].values.astype('float64'), timeperiod=20)
+            ma_cols = ['sma5', 'sma10', 'sma20']
+            df['converged'] = df[ma_cols].std(axis=1) / df[ma_cols].mean(axis=1) * 100
 
-                # --- 条件 1：3天前的一周均线靠近收敛 ---
-                # 取从第-8天到第-4天（即3天前的一周）的收敛度均值
-                df['avg_convergence'] = df['converged'].rolling(window=converged_windwos).mean().shift(2)
-                #print(f'{index} avg_convergence:{avg_convergence}')
-                df['is_converged'] = (df['avg_convergence'] < converged_threshold).fillna(False)  # 阈值可调，0.03代表间距在3%以内
+            # --- 条件 1：3天前的一周均线靠近收敛 ---
+            # 取从第-8天到第-4天（即3天前的一周）的收敛度均值
+            df['avg_convergence'] = df['converged'].rolling(window=converged_windwos).mean().shift(2)
+            #print(f'{index} avg_convergence:{avg_convergence}')
+            df['is_converged'] = (df['avg_convergence'] < converged_threshold).fillna(False)  # 阈值可调，0.03代表间距在3%以内
 
-                # --- 条件 2：最新3天向上突破 ---             
-                # 1. 基础计算：计算每日涨幅 (全量计分隔夜涨幅和日内涨幅两种,隔夜涨幅可以用ohlc替代close)
-                df['pct_chg'] = df['ohlc'].pct_change()
-                # 3.1 最近三天都收涨 (最小值 > 0)
-                df['all_positive'] = df['pct_chg'].rolling(window=3).min() > 0
-                # 3.2 至少1天涨幅 > 5% (最大值 > 0.05)
-                df['has_big_win'] = df['pct_chg'].rolling(window=3).max() > 0.02
-                # 3.3 3天整体涨幅 > 10% (今日价格 / 3天前价格 - 1)
-                # 注意：iloc[-1]/iloc[-4] 对应的是 3 天的跨度，所以用 shift(3)
-                df['total_3d_gain'] = (df['close'] / df['open'].shift(2)) - 1
-                df['gain_large_enough'] = df['total_3d_gain'] > 0.10
+            # --- 条件 2：最新3天向上突破 ---             
+            # 1. 基础计算：计算每日涨幅 (全量计分隔夜涨幅和日内涨幅两种,隔夜涨幅可以用ohlc替代close)
+            df['pct_chg'] = df['ohlc'].pct_change()
+            # 3.1 最近三天都收涨 (最小值 > 0)
+            df['all_positive'] = df['pct_chg'].rolling(window=3).min() > 0
+            # 3.2 至少1天涨幅 > 5% (最大值 > 0.05)
+            df['has_big_win'] = df['pct_chg'].rolling(window=3).max() > 0.02
+            # 3.3 3天整体涨幅 > 10% (今日价格 / 3天前价格 - 1)
+            # 注意：iloc[-1]/iloc[-4] 对应的是 3 天的跨度，所以用 shift(3)
+            df['total_3d_gain'] = (df['close'] / df['open'].shift(2)) - 1
+            df['gain_large_enough'] = df['total_3d_gain'] > 0.10
 
-                # 4. 综合价格突破条件
-                df['price_breakout'] = df['all_positive'] & df['has_big_win'] & df['gain_large_enough']
-                cols_to_fix = ['all_positive', 'has_big_win', 'gain_large_enough', 'price_breakout']
-                df[cols_to_fix] = df[cols_to_fix].fillna(False)
-                '''
-                # --- 基础数据计算 ---
-                # 1. 计算每日的“日内涨幅” 
-                df['intraday_chg'] = (df['close'] - df['open']) / df['open']
-                # 2.1 最近三天都收红盘 (all_positive)
-                df['all_positive'] = df['intraday_chg'].rolling(window=3).min() > 0
-                # 2.2 至少有 1 天涨幅超过 5% (has_big_win)
-                df['has_big_win'] = df['intraday_chg'].rolling(window=3).max() > 0.05
-                # 2.3 3天整体涨幅 > 10% (gain_large_enough)
-                df['total_3d_gain'] = (df['close'] / df['open'].shift(2)) - 1
-                df['gain_large_enough'] = df['total_3d_gain'] > 0.10
-                '''
-                
-                # 2.2 量能特征
-                df['avg_vol_3d'] = df['volume'].rolling(window=3).mean()
-                df['ma_vol_10'] = df['volume'].rolling(window=7).mean().shift(3)
-                df['volume_ignited'] = df['avg_vol_3d'] > (df['ma_vol_10'] * vol_gain)
-                df['volume_ignited'] = df['volume_ignited'].fillna(False)
+            # 4. 综合价格突破条件
+            df['price_breakout'] = df['all_positive'] & df['has_big_win'] & df['gain_large_enough']
+            cols_to_fix = ['all_positive', 'has_big_win', 'gain_large_enough', 'price_breakout']
+            df[cols_to_fix] = df[cols_to_fix].fillna(False)
+            '''
+            # --- 基础数据计算 ---
+            # 1. 计算每日的“日内涨幅” 
+            df['intraday_chg'] = (df['close'] - df['open']) / df['open']
+            # 2.1 最近三天都收红盘 (all_positive)
+            df['all_positive'] = df['intraday_chg'].rolling(window=3).min() > 0
+            # 2.2 至少有 1 天涨幅超过 5% (has_big_win)
+            df['has_big_win'] = df['intraday_chg'].rolling(window=3).max() > 0.05
+            # 2.3 3天整体涨幅 > 10% (gain_large_enough)
+            df['total_3d_gain'] = (df['close'] / df['open'].shift(2)) - 1
+            df['gain_large_enough'] = df['total_3d_gain'] > 0.10
+            '''
+            
+            # 2.2 量能特征
+            df['avg_vol_3d'] = df['volume'].rolling(window=3).mean()
+            df['ma_vol_10'] = df['volume'].rolling(window=7).mean().shift(3)
+            df['volume_ignited'] = df['avg_vol_3d'] > (df['ma_vol_10'] * vol_gain)
+            df['volume_ignited'] = df['volume_ignited'].fillna(False)
 
-                # --- 条件 3：今天状态确认 ---
-                # MA20斜率向上 (今日MA20 > 昨日MA20)# .diff() 会自动计算 df['sma20'] - df['sma20'].shift(1)
-                df['ma20_up'] = df['sma20'].diff() > 0
-                # 价格在MA20之上 (确保在通道上方),此处也可以设置为ohlc>sma20
-                df['above_ma20_line'] = df['close'] > df['sma20']
-                df['is_above20'] = df['ma20_up'] & df['above_ma20_line']
+            # --- 条件 3：今天状态确认 ---
+            # MA20斜率向上 (今日MA20 > 昨日MA20)# .diff() 会自动计算 df['sma20'] - df['sma20'].shift(1)
+            df['ma20_up'] = df['sma20'].diff() > 0
+            # 价格在MA20之上 (确保在通道上方),此处也可以设置为ohlc>sma20
+            df['above_ma20_line'] = df['close'] > df['sma20']
+            df['is_above20'] = df['ma20_up'] & df['above_ma20_line']
 
-                # --- 最终判定 ---
-                df['buy_signal'] = df['is_converged'] & df['price_breakout'] & df['volume_ignited'] & df['is_above20']
-                buy_signal = df['buy_signal'] .iloc[-1].item()
-                avg_convergence = df['avg_convergence'].iloc[-1].item()
-                total_3d_gain = df['total_3d_gain'].iloc[-1].item()
-                avg_vol_3d = df['avg_vol_3d'].iloc[-1].item()
-                ma_vol_10 = df['ma_vol_10'].iloc[-1].item()
-                ma20_up = df['ma20_up'].iloc[-1].item()
+            # --- 最终判定 ---
+            df['buy_signal'] = df['is_converged'] & df['price_breakout'] & df['volume_ignited'] & df['is_above20']
+            buy_signal = df['buy_signal'] .iloc[-1].item()
+            avg_convergence = df['avg_convergence'].iloc[-1].item()
+            total_3d_gain = df['total_3d_gain'].iloc[-1].item()
+            avg_vol_3d = df['avg_vol_3d'].iloc[-1].item()
+            ma_vol_10 = df['ma_vol_10'].iloc[-1].item()
+            ma20_up = df['ma20_up'].iloc[-1].item()
 
-                if buy_signal:
-                    # 计算基于 ATR 的吊灯止损位
-                    stop_loss, atr = self.get_trailingstop(df)
-                    curr_price = df['close'].iloc[-1].item()
+            if buy_signal:
+                # 计算基于 ATR 的吊灯止损位
+                stop_loss, atr = self.get_trailingstop(df)
+                curr_price = df['close'].iloc[-1].item()
 
                     # 返回结果及关键指标（便于存入CSV复盘）
                     result_data = {

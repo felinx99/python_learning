@@ -187,11 +187,24 @@ class Sector:
 
     def get_feed(self):
         return self.feed
+    
+    def get_L2Vol(self,symbol=None,start_date=None,end_date=None):
+        #stocklist = symbol['Code'].tolist()
+        stocklist = ['000935.SZ','600426.SH']
+
+        stock_l2 = self.feed.get_L2Vol(symbol=stocklist, start_date=start_date, end_date=end_date)
+        print(stock_l2)
+
 
 if __name__ == '__main__':
+    test = False
     sector = Sector()
     sectors_list = sector.get_up_sector(sectorlist=['concept', 'l3'], ret='today')
-    sectorslist_df = sector.get_up_sector(sectorlist=['concept', 'l3'], ret='daily')
-    sector.update_block(block_code='ZFBK', update_list=sectors_list)
     stocklist = sector.get_list_in_sector(sectorlist=sectors_list)
-    stocklist_df = sector.get_daily_list_in_sector(sectorlist_df=sectorslist_df)
+    sector.get_L2Vol(stocklist, '20220301', '20220305')
+    if test:
+        sectors_list = sector.get_up_sector(sectorlist=['concept', 'l3'], ret='today')
+        sectorslist_df = sector.get_up_sector(sectorlist=['concept', 'l3'], ret='daily')
+        sector.update_block(block_code='ZFBK', update_list=sectors_list)
+        stocklist = sector.get_list_in_sector(sectorlist=sectors_list)
+        stocklist_df = sector.get_daily_list_in_sector(sectorlist_df=sectorslist_df)

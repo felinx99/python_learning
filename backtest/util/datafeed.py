@@ -1,12 +1,14 @@
 from abc import ABC, abstractmethod
-import sys
-sys.path.append('D:/new_tdx/PYPlugins/user')
 from tqcenter import tq # type: ignore
 import tushare as ts
 import akshare as ak
 import pandas as pd
+from datetime import datetime, timedelta
 
 class FeedBase(ABC):
+    date_fmt = {
+        'DAY': '%Y%m%d',
+    }
     @abstractmethod
     def init_feed(self, **kwargs):
         pass
@@ -83,6 +85,37 @@ class TdxFeed(FeedBase):
                     df = df.reset_index(drop=True)  #重置索引
                 df.columns = df.columns.str.lower()
         return df[['date', 'symbol', 'open', 'high', 'low', 'close', 'volume']]
+
+    @staticmethod
+    def _L2Vol_to_df(data):
+        """
+        把tq.formula_process_mul_zb中'L2定单分析'公式返回的dict转换为DataFrame格式
+        输出格式: date, symbol, huge_limit, huge_market, large_limit, large_market,
+                 mid_limit, mid_market, small_limit, small_market
+        """
+        error_id = data.pop('ErrorId', '0')
+        if error_id != '0':
+            return None
+        
+        all_ret = []
+        
+        # 定义你需要提取的指标列名,tdx输入为全大写，不可更改
+        cols = ['HUGE_LIMIT', 'HUGE_MARKET', 'LARGE_LIMIT', 'LARGE_MARKET', 
+                'MID_LIMIT', 'MID_MARKET', 'SMALL_LIMIT', 'SMALL_MARKET']
+        
+        for symbol, fields in data.items():
+            zipped_values = zip(
+                [item['Date'] for item in fields['HUGE_LIMIT']],
+                *[ [item['Value'] for item in fields[c]] for c in cols ]
+            )
+            for date, *values in zipped_values:
+                all_ret.append((symbol, date, *values))
+
+        # 4. 一次性合并（比循环 concat 快得多）
+        final_df = pd.DataFrame.from_records(all_ret, columns=['symbol', 'date'] + cols).sort_values(['symbol', 'date']).reset_index(drop=True)
+        final_df.columns = final_df.columns.str.lower()
+        return final_df
+        
     
     def init_feed(self, **kwargs):
         print("初始化通达信数据源")
@@ -121,8 +154,7 @@ class TdxFeed(FeedBase):
 
         return df
     
-    def get_daily(self, **kwargs):
-        
+    def get_daily(self, **kwargs):   
         symbol = kwargs.get('symbol', None)
         start_date = kwargs.get('start_date', None)
         end_date = kwargs.get('end_date', None)
@@ -149,6 +181,29 @@ class TdxFeed(FeedBase):
         #此处可添加更新板块数据的逻辑，如调用Tushare接口获取最新板块信息等
         tq.clear_sector(block_name)
         tq.send_user_block(block_name, stock_list, show=True)
+
+    def get_L2Vol(self, **kwargs):
+        today = datetime.now().strftime(FeedBase.date_fmt['DAY'])
+        symbol = kwargs.get('symbol', None)
+        start_date = kwargs.get('start_date', '20260101')
+        end_date = kwargs.get('end_date', '20260301')
+
+        if type(symbol) is not list:
+            symbol = [symbol]
+
+        mul_zb_res = tq.formula_process_mul_zb(
+            formula_name='L2定单分析',
+            formula_arg='',
+            return_count=0,
+            return_date=True,
+            stock_list=symbol,
+            stock_period='1d',
+            start_time = start_date,
+            end_time = end_date,
+            count=0,
+            dividend_type=1)
+        df = self._L2Vol_to_df(mul_zb_res)
+        return df
         
 @FeedManager.init('tushare')
 class TushareFeed(FeedBase):

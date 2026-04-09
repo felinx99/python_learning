@@ -32,6 +32,9 @@ def prepare_date(df=None):
 
     return df
 
+def get_L2():
+    pass
+
 def save_csvfile(path=None, data=None, period=None):
     datefmt = CONFIG.date_fmt[period]
     
@@ -73,7 +76,7 @@ def read_tdx_files(args):
     # 转换处理
     df_src = df_src.drop('amount', axis=1)
     
-    new_pbrows = save_csvfile(dstfile, df_src, dateframe)
+    new_pbrows = save_csvfile(dstfile, df_src, dateframe, symbol)
     if new_pbrows is not None:
         new_pbrows['symbol'] = symbol
         return new_pbrows

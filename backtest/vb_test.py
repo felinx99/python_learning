@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import gc
 import vectorbt as vbt
 import time
+import math
 from pathlib import Path
 from dateutil.relativedelta import relativedelta
 from . import sectorpick
@@ -17,7 +18,7 @@ from api.timeprofile import TimeProfile
 
 
 
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist.csv'
+STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test.csv'
 RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\'
 DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
@@ -379,6 +380,25 @@ def compute_cv_adaptive(ma_list):
     
     # 4. 计算变异系数
     cv = (ma_std / (ma_mean + 1e-8)) * 100
+
+    
+    n = len(ma_list)
+    
+    # 1. 计算均值 (Mean)
+    ma_sum = sum(ma_list)
+    ma_mean1 = ma_sum / n
+    
+    # 2. 计算方差 (Variance) - 使用 ddof=1 (n-1)
+    # 先计算离差平方和
+    sum_sq_diff = sum((x - ma_mean1) ** 2 for x in ma_list)
+    variance = sum_sq_diff / (n - 1)
+    
+    # 3. 计算标准差 (Standard Deviation)
+    ma_std1 = np.sqrt(variance)
+    
+    # 4. 计算变异系数 (Coefficient of Variation)
+    # 加上 1e-8 防止除以 0
+    cv1 = (ma_std1 / (ma_mean1 + 1e-8)) * 100
     return cv.astype(np.float32)
 
 if __name__ == '__main__':
@@ -419,21 +439,21 @@ if __name__ == '__main__':
     time_chunks = generate_time_chunks(start_dt, end_dt, split_config, roll_config)
     
     # 3. 参数空间:测试版本和完整版本
-    #converged_window_space = [6]
-    #converged_threshold_space = [3]
-    #vol_gain_space = [2.2]
-    #k_atr_space = [4.0]
-    #short_space = [6]
-    #mid_space = [14]
-    #long_space = [20,25]
+    converged_window_space = [6]
+    converged_threshold_space = [3]
+    vol_gain_space = [2.2]
+    k_atr_space = [4.0]
+    short_space = [6]
+    mid_space = [14]
+    long_space = [20]
 
-    converged_window_space = [4,5,6]
-    converged_threshold_space = [1.8, 2.1, 2.4, 2.7]
-    vol_gain_space = [1.3, 1.5, 1.8, 2.1]
-    k_atr_space = [3.0, 3.5, 4.0, 4.5]
-    short_space = (3,4,5)
-    mid_space = (8, 10, 12, 14)
-    long_space = (20,25,30,35)
+    #converged_window_space = [4,5,6]
+    #converged_threshold_space = [1.8, 2.1, 2.4, 2.7]
+    #vol_gain_space = [1.3, 1.5, 1.8, 2.1]
+    #k_atr_space = [3.0, 3.5, 4.0, 4.5]
+    #short_space = (3,4,5)
+    #mid_space = (8, 10, 12, 14)
+    #long_space = (20,25,30,35)
 
     #预处理sma部分
     all_sma_windows = sorted(short_space + mid_space + long_space)
@@ -459,104 +479,104 @@ if __name__ == '__main__':
     global_dates = stocks_part_dict['close'].index
     idx = 0
     for i, (s_dt, e_dt) in enumerate(time_chunks):
-    
-        s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
-        #if s_str != '2024-01-02':
-        #    continue
-        window_slice = global_dates.slice_indexer(s_str, e_str)
-        # 假设 s_str, e_str 对应的位置是 start_idx, end_idx
-        start_idx = window_slice.start
-        end_idx = window_slice.stop  # 必须 +1 包含结束日
-        num_symbols = stocks_part_dict['close'].shape[1]
-        n_time = end_idx - start_idx
-        # 局部时间切片 (宽表)
-        #ohlc_tile = to_f32_np(w_ohlc)
-        close_tile = close_np[window_slice, :]
-        high_tile = high_np[window_slice, :]
-        atr_tile = atr_np[window_slice, :]
-        vol3_tile = vol3_np[window_slice, :]
-        vol10_tile = vol10_np[window_slice, :]
-        pct_tile = pct_np[window_slice, :]
+        with TimeProfile():
+            s_str, e_str = s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d')
+            #if s_str != '2024-01-02':
+            #    continue
+            window_slice = global_dates.slice_indexer(s_str, e_str)
+            # 假设 s_str, e_str 对应的位置是 start_idx, end_idx
+            start_idx = window_slice.start
+            end_idx = window_slice.stop  # 必须 +1 包含结束日
+            num_symbols = stocks_part_dict['close'].shape[1]
+            n_time = end_idx - start_idx
+            # 局部时间切片 (宽表)
+            #ohlc_tile = to_f32_np(w_ohlc)
+            close_tile = close_np[window_slice, :]
+            high_tile = high_np[window_slice, :]
+            atr_tile = atr_np[window_slice, :]
+            vol3_tile = vol3_np[window_slice, :]
+            vol10_tile = vol10_np[window_slice, :]
+            pct_tile = pct_np[window_slice, :]
 
-        if len(close_tile) < 100:
-            continue
-        
-        print(f"🔄 正在处理切片 {i+1}: {s_dt.strftime('%Y%m%d')} -> {e_dt.strftime('%Y%m%d')} ({len(close_tile)} 行)")
-        window_scores = []
-        #batch_size保持在10~15之间，可以在内存和运行速度之间平衡
-        batch_size = len(short_space)*len(mid_space)*len(long_space)
-        for combo_batch in chunked_iterable(all_combos, batch_size):
-            cw_w = [c[0] for c in combo_batch]
-            ct_w = [c[1] for c in combo_batch]
-            vg_w = [c[2] for c in combo_batch]
-            k_atr_w = [c[3] for c in combo_batch]
-            s_keys = [c[4] for c in combo_batch] # 对应 s_w
-            #m_keys = [c[5] for c in combo_batch] # 对应 s_w
-            l_keys = [c[6] for c in combo_batch] # 对应 l_w
-            conv_keys = [(c[4], c[5], c[6]) for c in combo_batch] # 对应 (s_w, m_w, l_w)
-            idx += 1
-            total_col = l_ma_tile.shape[1]
+            if len(close_tile) < 100:
+                continue
             
-            #s_ma_tile = np.hstack([ma_cache[k][window_slice] for k in s_keys])
-            #m_ma_tile = np.hstack([ma_cache[k][window_slice] for k in m_keys])
-            l_ma_tile = np.hstack([ma_cache[k][window_slice] for k in l_keys])
-            ma_conv_tile = np.hstack([ma_convg_cache[k][window_slice] for k in conv_keys])
+            print(f"🔄 正在处理切片 {i+1}: {s_dt.strftime('%Y%m%d')} -> {e_dt.strftime('%Y%m%d')} ({len(close_tile)} 行)")
+            window_scores = []
+            #batch_size保持在10~15之间，可以在内存和运行速度之间平衡
+            batch_size = len(short_space)*len(mid_space)*len(long_space)
+            for combo_batch in chunked_iterable(all_combos, batch_size):
+                cw_w = [c[0] for c in combo_batch]
+                ct_w = [c[1] for c in combo_batch]
+                vg_w = [c[2] for c in combo_batch]
+                k_atr_w = [c[3] for c in combo_batch]
+                s_keys = [c[4] for c in combo_batch] # 对应 s_w
+                #m_keys = [c[5] for c in combo_batch] # 对应 s_w
+                l_keys = [c[6] for c in combo_batch] # 对应 l_w
+                conv_keys = [(c[4], c[5], c[6]) for c in combo_batch] # 对应 (s_w, m_w, l_w)
+                idx += 1
+                
+                
+                #s_ma_tile = np.hstack([ma_cache[k][window_slice] for k in s_keys])
+                #m_ma_tile = np.hstack([ma_cache[k][window_slice] for k in m_keys])
+                l_ma_tile = np.hstack([ma_cache[k][window_slice] for k in l_keys])
+                ma_conv_tile = np.hstack([ma_convg_cache[k][window_slice] for k in conv_keys])
+                total_col = l_ma_tile.shape[1]
+                # 运行自定义指标
+                entries_np, exits_np = breakout_strategy(
+                    close_tile, high_tile, atr_tile, vol3_tile,vol10_tile,pct_tile,ma_conv_tile,
+                    l_ma_tile, cw_w, ct_w, vg_w, k_atr_w,
+                    n_3d = (n_time,total_col,num_symbols)
+                )
+                
+
+                group_by_ids = np.repeat(np.arange(len(combo_batch)), num_symbols)
+
+                # 运行组合回测
+                pf = vbt.Portfolio.from_signals(
+                    close = np.tile(close_tile, (1, len(combo_batch))),
+                    entries=entries_np,
+                    exits=exits_np, 
+                    size=0.01, # 单次开仓2%
+                    size_type='percent',
+                    cash_sharing=True,
+                    #call_seq='random',
+                    fees=0.002,
+                    slippage=0.001,
+                    freq='D',
+                    init_cash=10000000,
+                    group_by=group_by_ids, # 按参数组合分组计算
+                )
+
+                
+                batch_trades = get_batch_trade_details(pf, stocks_part_dict['close'].columns, combo_batch, i+1, s_str, e_str, global_dates[window_slice])
+                if s_str == '2024-01-02':
+                    if not batch_trades.empty:
+                        f_path = Path(RESULT_PATH)/'vb'/f"vb_test_out_{idx}.csv"
+                        batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')
+                del batch_trades
         
-            # 运行自定义指标
-            entries_np, exits_np = breakout_strategy(
-                close_tile, high_tile, atr_tile, vol3_tile,vol10_tile,pct_tile,ma_conv_tile,
-                l_ma_tile, cw_w, ct_w, vg_w, k_atr_w,
-                n_3d = (n_time,total_col,num_symbols)
-            )
+                # 收集多维度指标 
+                #batch_score = get_score(pf)
+                batch_score = get_score_njit(pf, close_tile)
+                #batch_score = get_score_single(pf)
+                batch_score.index = pd.MultiIndex.from_tuples(
+                    [combo_batch[i] for i in batch_score.index], 
+                    names=param_names
+                )
+                window_scores.append(batch_score)
+                            
+                #显示清理内存
+                del pf, entries_np,exits_np, ma_conv_tile, l_ma_tile
+                gc.collect()
+
+            if (end_dt - e_dt).days < 30: break
             
-
-            group_by_ids = np.repeat(np.arange(len(combo_batch)), num_symbols)
-
-            # 运行组合回测
-            pf = vbt.Portfolio.from_signals(
-                close = np.tile(close_tile, (1, len(combo_batch))),
-                entries=entries_np,
-                exits=exits_np, 
-                size=0.01, # 单次开仓2%
-                size_type='percent',
-                cash_sharing=True,
-                #call_seq='random',
-                fees=0.002,
-                slippage=0.001,
-                freq='D',
-                init_cash=10000000,
-                group_by=group_by_ids, # 按参数组合分组计算
-            )
-
-            
-            batch_trades = get_batch_trade_details(pf, stocks_part_dict['close'].columns, combo_batch, i+1, s_str, e_str, global_dates[window_slice])
-            if s_str == '2024-01-02':
-                if not batch_trades.empty:
-                    f_path = Path(RESULT_PATH)/'vb'/f"vb_test_out_{idx}.csv"
-                    batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')
-            del batch_trades
-    
-            # 收集多维度指标 
-            #batch_score = get_score(pf)
-            batch_score = get_score_njit(pf, close_tile)
-            #batch_score = get_score_single(pf)
-            batch_score.index = pd.MultiIndex.from_tuples(
-                [combo_batch[i] for i in batch_score.index], 
-                names=param_names
-            )
-            window_scores.append(batch_score)
-                        
-            #显示清理内存
-            del pf, entries_np,exits_np, ma_conv_tile, l_ma_tile
-            gc.collect()
-
-        if (end_dt - e_dt).days < 30: break
-        
-        # 汇总当前窗口所有批次，并存入总列表
-        if window_scores:
-            window_df = pd.concat(window_scores)
-            print(f"   ✅ 切片处理完成。当前切片最高分: {window_df['score'].max():.4f}, 平均夏普: {window_df['sharpe'].mean():.4f}")
-            window_results.append(window_df)
+            # 汇总当前窗口所有批次，并存入总列表
+            if window_scores:
+                window_df = pd.concat(window_scores)
+                print(f"   ✅ 切片处理完成。当前切片最高分: {window_df['score'].max():.4f}, 平均夏普: {window_df['sharpe'].mean():.4f}")
+                window_results.append(window_df)
             
     # 6. 最终聚合：选出在所有时间窗口表现最稳的参数
     if window_results:
