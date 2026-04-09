@@ -76,7 +76,7 @@ def read_tdx_files(args):
     # 转换处理
     df_src = df_src.drop('amount', axis=1)
     
-    new_pbrows = save_csvfile(dstfile, df_src, dateframe, symbol)
+    new_pbrows = save_csvfile(dstfile, df_src, dateframe)
     if new_pbrows is not None:
         new_pbrows['symbol'] = symbol
         return new_pbrows

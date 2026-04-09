@@ -6,6 +6,7 @@ import pandas as pd
 # 导入你的模块
 from backtest.stocklist import StockPoolManager
 from backtest import st_breakout, st_boxtheory, annual_stock_analysis # 假设你放在 strategies 文件夹下
+from tools import download_tdx
 # from data_module import update_daily_data # 假设你的数据下载模块
 
 # --- 配置区 ---
@@ -37,27 +38,28 @@ def run_pipeline():
     try:
         # 第一步：数据更新
         logging.info("步骤 1: 正在更新本地行情数据...")
-        # update_daily_data() 
+        download_tdx.download_stock()
+        download_tdx.download_sector(sectorlist=['concept', 'l1', 'l2', 'l3'])
         logging.info("数据更新完成。")
 
         # 初始化股票池管理器
-        manager = StockPoolManager(OUTPUT_PATH, TDX_BLOCK_PATH)
+        manager = StockPoolManager()
 
         # 第二步：策略并行筛选
         # 策略 A: 点火突破
         logging.info("步骤 2.1: 运行 [点火突破] 策略...")
-        df_breakout = st_breakout.run_strategy() # 假设返回含有 code, name 的 DF
+        df_breakout = st_breakout.TrendStrategyTerm().run_strategy() # 假设返回含有 code, name 的 DF
         manager.add_to_pool(df_breakout, "点火突破")
 
         # 策略 B: 箱体理论
-        logging.info("步骤 2.2: 运行 [箱体突破] 策略...")
-        df_box = st_boxtheory.run_strategy()
-        manager.add_to_pool(df_box, "箱体突破")
+        #logging.info("步骤 2.2: 运行 [箱体突破] 策略...")
+        #df_box = st_boxtheory.run_strategy()
+        #manager.add_to_pool(df_box, "箱体突破")
 
         # 策略 C: 年度涨幅 TOP300
-        logging.info("步骤 2.3: 运行 [年度涨幅TOP300] 策略...")
-        df_top300 = annual_stock_analysis.run_strategy()
-        manager.add_to_pool(df_top300, "年度涨幅TOP300")
+        #logging.info("步骤 2.3: 运行 [年度涨幅TOP300] 策略...")
+        #df_top300 = annual_stock_analysis.run_strategy()
+        #manager.add_to_pool(df_top300, "年度涨幅TOP300")
 
         # 第三步：同步与指标更新 (核心维护)
         logging.info("步骤 3: 正在进行股票池同步与价格指标更新...")

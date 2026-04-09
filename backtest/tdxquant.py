@@ -3,8 +3,10 @@ import talib as ta
 import numpy as np
 import time
 from datetime import datetime, timedelta
-from tqcenter import tq # type: ignore
 from common import CONFIG
+import sys
+sys.path.append(CONFIG.inferred_path['TDX_INSTALL_QUANT'])
+from tqcenter import tq # type: ignore
 
 
 def calculate_average_correlation_numpy(df):

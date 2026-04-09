@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
-from tqcenter import tq # type: ignore
 import tushare as ts
 import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
+from common import CONFIG
+import sys
+sys.path.append(CONFIG.inferred_path['TDX_INSTALL_QUANT'])
+from tqcenter import tq # type: ignore
 
 class FeedBase(ABC):
     date_fmt = {

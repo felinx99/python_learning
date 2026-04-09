@@ -23,6 +23,8 @@ dependencies = [
     "pyarrow (>=23.0.1,<24.0.0)",
     "seaborn (>=0.13.2,<0.14.0)",
     "numba (>=0.65.0,<0.66.0)",
+    "backtrader @ file:///E:/gitcode/backtrader",
+    "common @ file:///E:/gitcode/common",
 ]
 
 [tool.poetry]
@@ -30,8 +32,6 @@ package-mode = false
 
 [tool.poetry.dependencies]
 # 使用相对路径指向旁边的项目
-backtrader = { path = "../backtrader", develop = true }
-common = { path = "../common", develop = true }
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

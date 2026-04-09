@@ -12,19 +12,14 @@ import time
 import math
 from pathlib import Path
 from dateutil.relativedelta import relativedelta
-from . import sectorpick
 from .util.breakout import breakout_strategy, fast_score_kernel, fast_fill_nan
 from api.timeprofile import TimeProfile
+from common import CONFIG,DATAFRAME
 
-
-
-STOCKLIST_PATH = 'E:\\output\\Astock\\stockpicking\\stocklist_test.csv'
-RESULT_PATH = 'E:\\output\\Astock\\stockpicking\\analysis\\'
-DATA_PATH = 'E:\\datas\\tdx\\day_2018_2025'
 STARTDATE = '2018-01-02'
 ENDDATE = '2025-12-26'
-YEAR_DAYS = 244.0
-vbt.settings.returns['year_freq'] = pd.Timedelta(days=244)
+
+vbt.settings.returns['year_freq'] = pd.Timedelta(days=CONFIG.YEAR_DAYS)
 
 stock_csvtype = {
     'open': 'float32',
@@ -97,7 +92,7 @@ def prepare_stocks(src_df=None, values=[]):
 
 def load_all_stocks(stocklist):
     target_tickers = [str(ticker) for ticker, founddate in stocklist]
-    srcpath = Path(DATA_PATH)/'all_stock_daily.parquet'
+    srcpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
 
     try:
         full_df = pd.read_parquet(srcpath, engine='pyarrow')
@@ -182,7 +177,7 @@ def get_score_single(pf):
     else:
         dd_dur_days = float(max_dur)
     
-    dd_score = np.clip(1.0 - (dd_dur_days / YEAR_DAYS), 0.0, 1.0)
+    dd_score = np.clip(1.0 - (dd_dur_days / CONFIG.YEAR_DAYS), 0.0, 1.0)
 
     # 6. 计算最终得分
     calmar = ann_ret / max_dd
@@ -270,7 +265,7 @@ def get_score(pf):
     
     # 4. 指标合成
     calmar = ann_ret / max_dd_abs
-    dd_score = np.clip(1.0 - (dd_dur_days / YEAR_DAYS), 0.0, 1.0)
+    dd_score = np.clip(1.0 - (dd_dur_days / CONFIG.YEAR_DAYS), 0.0, 1.0)
     
     # 综合得分
     score = (0.4 * calmar) + (0.2 * dd_score) + (0.2 * sharpe) + (0.2 * win_rate)
@@ -403,7 +398,9 @@ def compute_cv_adaptive(ma_list):
 
 if __name__ == '__main__':
     # 1. 准备数据 (建议替换为你的 TDX 数据)
-    TICKERS_DF = pd.read_csv(STOCKLIST_PATH, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式
+    fpath = CONFIG.inferred_path['STOCKLIST_PATH']
+    #fpath = CONFIG.base_path['STOCK_OUTPUT_PATH']
+    TICKERS_DF = pd.read_csv(fpath, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式
     stocklist = list(TICKERS_DF.to_records(index=False))
     
     allstocks_data_df = load_all_stocks(stocklist)
@@ -552,7 +549,7 @@ if __name__ == '__main__':
                 batch_trades = get_batch_trade_details(pf, stocks_part_dict['close'].columns, combo_batch, i+1, s_str, e_str, global_dates[window_slice])
                 if s_str == '2024-01-02':
                     if not batch_trades.empty:
-                        f_path = Path(RESULT_PATH)/'vb'/f"vb_test_out_{idx}.csv"
+                        f_path = CONFIG.inferred_path['RESULT_PATH']/'vb'/f"vb_test_out_{idx}.csv"
                         batch_trades.to_csv(f_path, index=False, encoding='utf-8-sig', float_format='%.2f')
                 del batch_trades
         
@@ -620,7 +617,8 @@ if __name__ == '__main__':
         print(f"\n🌟 推荐最优组合: CV={best_p[0]}, CT={best_p[1]}, VG={best_p[2]}, MA_Set=({best_p[3]},{best_p[4]},{best_p[5]})")
 
    # if all_trade_details:
+   #     fpath = CONFIG.inferred_path['RESULT_PATH']/'vb'/f"vb_final_out.csv"
     #    final_trade_report = pd.concat(all_trade_details, ignore_index=True)
-   #     final_trade_report.to_csv(RESULT_PATH, index=False, encoding='utf-8-sig', float_format='%.2f')
+   #     final_trade_report.to_csv(fpath, index=False, encoding='utf-8-sig', float_format='%.2f')
    #     print(f"🚀 全时段交易报告已生成！总计 {len(final_trade_report)} 笔交易。")
    

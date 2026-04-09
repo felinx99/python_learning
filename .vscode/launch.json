@@ -43,6 +43,15 @@
             ]
         },
 
+        {
+            "name": "daily pipeline",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "daily_pipeline",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+        },
 
         {
             "name": "backtest: boxtheory",

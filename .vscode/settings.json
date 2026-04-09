@@ -4,14 +4,7 @@
     //每次打开终端时自动激活该环境
     //"python.terminal.activateEnvInSelectedTerminal": true,
     //"terminal.integrated.environmentChangesRelaunch": true,
-<<<<<<< Updated upstream
-    "python.analysis.extraPaths": [
-        "F:/gitcode",
-        "D:/new_tdx/PYPlugins/user"
-    ],
-=======
-    "python.analysis.extraPaths": [".\\.\\common"],
->>>>>>> Stashed changes
+
     //隐藏指定目录
     "files.exclude": {
         "**/.venv": true,

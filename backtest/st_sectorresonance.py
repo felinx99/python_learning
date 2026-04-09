@@ -28,8 +28,8 @@ class Sector:
         'volume': 'float64',
     }
 
-    def __init__(self):
-        self.feed = datafeed.FeedManager.register('tdx')
+    def __init__(self, type='tdx'):
+        self.feed = datafeed.FeedManager.register(type)
         self.feed.init_feed()
 
     @classmethod
