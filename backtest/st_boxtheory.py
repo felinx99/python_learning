@@ -88,7 +88,7 @@ def add_data(cerebro=None, **kwargs):
         # Set up data feed
         for ticker, listdate in tickers:
             
-            tickerpath = os.path.join(CONFIG.tdx_data_path[DATAFRAME.DAY], f'{ticker}.csv')
+            tickerpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/f'{ticker}.csv'
             data = bt.feeds.stockCSVData(
                 name = ticker,
                 dataname=tickerpath,

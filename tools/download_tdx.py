@@ -71,7 +71,7 @@ def read_tdx_files(args):
         return None
     
     symbol = f"{srcfile.stem[2:]}.{srcfile.stem[:2].upper()}"
-    dstfile = Path(CONFIG.tdx_data_path[dateframe]) / f"{symbol}.csv"
+    dstfile = CONFIG.tdx_data_path[dateframe]/f"{symbol}.csv"
 
     # 转换处理
     df_src = df_src.drop('amount', axis=1)
@@ -112,7 +112,7 @@ def download_stock():
         for col, dtype in CONFIG.stock_csvtype.items():
             final_df[col] = final_df[col].astype(dtype)
         
-        pb_path = Path(CONFIG.tdx_data_path[DATAFRAME.DAY]) /'all_stock_daily.parquet'
+        pb_path = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
         header = not Path(pb_path).exists()
         table = pa.Table.from_pandas(final_df)
         

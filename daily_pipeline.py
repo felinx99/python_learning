@@ -8,11 +8,9 @@ from backtest.stocklist import StockPoolManager
 from backtest import st_breakout, st_boxtheory, st_annualtop # 假设你放在 strategies 文件夹下
 from tools import download_tdx
 # from data_module import update_daily_data # 假设你的数据下载模块
-from common import CONFIG
+from common import CONFIG, DATAFRAME
 
 # --- 配置区 ---
-OUTPUT_PATH = "./data/stock_pools/"
-TDX_BLOCK_PATH = "C:/new_tdx/T0002/blocknew/"
 LOG_FILE = f"./logs/pipeline_{datetime.now().strftime('%Y%m%d')}.log"
 
 # 配置日志
@@ -27,7 +25,7 @@ def price_loader(code, start_date):
     """
     这里对接你第一步下载的本地数据文件
     """
-    file_path = f"./data/daily_kline/{code}.csv"
+    file_path = CONFIG.tdx_data_path[DATAFRAME['DAY']]/f'{code}.csv'
     if os.path.exists(file_path):
         df = pd.read_csv(file_path, index_col='date', parse_dates=True)
         return df.loc[start_date:]

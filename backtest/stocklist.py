@@ -16,6 +16,8 @@ class StockPoolManager:
         self.deleted_df = self._load_csv(self.DELETED_FILE)
         self.feed = datafeed.FeedManager.register("tdx")
         self.feed.init_feed()
+        #先根据通达信 .blk 文件同步手动增删情况，完成“名单更新”
+        self._sync_with_tdx_manual()
 
     def _load_csv(self, path):
         if path.exists():
@@ -65,41 +67,39 @@ class StockPoolManager:
     def sync_and_update(self, price_provider_func):
         """
         执行顺序：
-        1. 先根据通达信 .blk 文件同步手动增删情况，完成“名单更新”
-        2. 对更新后的名单统一进行价格特征指标计算
-        3. 判定出池条件（时间、回撤）
-        4. 保存并同步回通达信
-        """
-        # --- 第一步：同步通达信手动变更 (名单对齐) ---
-        self._sync_with_tdx_manual()
+        1. 对更新后的名单统一进行价格特征指标计算
+        2. 判定出池条件（时间、回撤）
+        3. 保存并同步回通达信
+        """      
 
-        # --- 第二步：更新池内所有股票的价格特征 (数据补全) ---
+        # --- 第一步：更新池内所有股票的价格特征 (数据补全) ---
         self._update_all_price_metrics(price_provider_func)
 
-        # --- 第三步：出池逻辑判定 ---
+        # --- 第二步：出池逻辑判定 ---
         self._check_exit_conditions()
 
-        # --- 第四步：最终持久化与反馈 ---
+        # --- 第三步：最终持久化与反馈 ---
         self._write_tdx_blk('DQSY', self.selection_df['ts_code'].tolist())
         self._write_tdx_blk('DQSC', self.deleted_df['ts_code'].tolist())
         self._save_csv()
 
     def _sync_with_tdx_manual(self):
-        """同步通达信板块文件的手工操作"""
+        """同步通达信板块的手工操作"""
         tdx_codes = self._read_tdx_blk('DQSY')
-        csv_codes = self.selection_df['ts_code'].tolist() if not self.selection_df.empty else []
+        set_tdx = set(tdx_codes['Code'])
+        set_add = set(self.selection_df['ts_code'])
 
         # 1. 手工添加：通达信有，CSV没有
-        for c in tdx_codes:
-            if c not in csv_codes:
-                # 注意：手动添加时由于没有 strategy_name，入池原因为“手工添加”
-                # 名称暂时留空或通过后续 price_provider 获取
-                self.add_to_pool(pd.DataFrame([{'code': c, 'name': '股票名称'}]), "manual")
+        code_diff = set_tdx - set_add
+        result_df = tdx_codes[tdx_codes['Code'].isin(code_diff)]
+        self.add_to_pool(result_df, "manual")
 
         # 2. 手工删除：CSV有，通达信没有
-        for c in csv_codes:
-            if c not in tdx_codes and not tdx_codes.empty:
-                self._do_remove(c, "手工删除")
+        code_diff = set_add - set_tdx
+        result_df = self.selection_df[self.selection_df['ts_code'].isin(code_diff)]
+        result_df['out_type'] = 'manual'
+        self.deleted_df = pd.concat([self.deleted_df, result_df], ignore_index=True)
+
 
     def _update_all_price_metrics(self, price_provider_func):
         """统一更新待选池中所有股票的指标"""
@@ -155,7 +155,7 @@ class StockPoolManager:
     def _do_remove(self, code, reason):
         """执行删除的具体动作"""
         target_row = self.selection_df[self.selection_df['ts_code'] == code].iloc[0].to_dict()
-        target_row['出池原因'] = reason
+        target_row['out_type'] = reason
         # 移除不需要保存到已删池的列
         target_row.pop('highest_duration', None)
         
