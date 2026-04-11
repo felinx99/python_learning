@@ -18,11 +18,12 @@ class StockPoolManager:
         self.feed.init_feed()
         #先根据通达信 .blk 文件同步手动增删情况，完成“名单更新”
         self._sync_with_tdx_manual()
+        print(self.deleted_df)
 
     def _load_csv(self, path):
         if path.exists():
             return pd.read_csv(path, dtype={'ts_code': str})
-        return pd.DataFrame()
+        return pd.DataFrame(columns=['ts_code', 'name'])
         
     
     def _save_csv(self):
@@ -86,19 +87,21 @@ class StockPoolManager:
     def _sync_with_tdx_manual(self):
         """同步通达信板块的手工操作"""
         tdx_codes = self._read_tdx_blk('DQSY')
-        set_tdx = set(tdx_codes['Code'])
-        set_add = set(self.selection_df['ts_code'])
+        if not tdx_codes.empty:
+            set_tdx = set(tdx_codes['Code'])
+            set_add = set(self.selection_df['ts_code'])
 
-        # 1. 手工添加：通达信有，CSV没有
-        code_diff = set_tdx - set_add
-        result_df = tdx_codes[tdx_codes['Code'].isin(code_diff)]
-        self.add_to_pool(result_df, "manual")
+            # 1. 手工添加：通达信有，CSV没有
+            code_diff = set_tdx - set_add
+            result_df = tdx_codes[tdx_codes['Code'].isin(code_diff)]
+            self.add_to_pool(result_df, "manual")
 
-        # 2. 手工删除：CSV有，通达信没有
-        code_diff = set_add - set_tdx
-        result_df = self.selection_df[self.selection_df['ts_code'].isin(code_diff)]
-        result_df['out_type'] = 'manual'
-        self.deleted_df = pd.concat([self.deleted_df, result_df], ignore_index=True)
+            # 2. 手工删除：CSV有，通达信没有
+            code_diff = set_add - set_tdx
+            result_df = self.selection_df[self.selection_df['ts_code'].isin(code_diff)]
+            result_df['out_type'] = 'manual'
+            self.deleted_df = pd.concat([self.deleted_df, result_df], ignore_index=True)
+            print(self.deleted_df)
 
 
     def _update_all_price_metrics(self, price_provider_func):

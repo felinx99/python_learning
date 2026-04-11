@@ -11,7 +11,7 @@ from tools import download_tdx
 from common import CONFIG, DATAFRAME
 
 # --- 配置区 ---
-LOG_FILE = f"./logs/pipeline_{datetime.now().strftime('%Y%m%d')}.log"
+LOG_FILE = CONFIG.inferred_path['RESULT_PATH']/'logs'/f"pipeline_{datetime.now().strftime('%Y%m%d')}.log"
 
 # 配置日志
 os.makedirs("./logs", exist_ok=True)
