@@ -37,8 +37,8 @@ def run_pipeline():
     try:
         # 第一步：数据更新
         logging.info("步骤 1: 正在更新本地行情数据...")
-        #download_tdx.download_stock()
-        #download_tdx.download_sector(sectorlist=['concept', 'l1', 'l2', 'l3'])
+        download_tdx.download_stock()
+        download_tdx.download_sector(sectorlist=['concept', 'l1', 'l2', 'l3'])
         logging.info("数据更新完成。")
 
         # 初始化股票池管理器
