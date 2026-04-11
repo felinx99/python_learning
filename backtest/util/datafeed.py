@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import tushare as ts
 import akshare as ak
 import pandas as pd
+import threading
 from datetime import datetime, timedelta
 from common import CONFIG
 import sys
@@ -44,14 +45,22 @@ class FeedProxy:
 class FeedManager:
     #数据管理器，管理不同来源的数据实例
     _feedcls = {}
+    _lock = threading.Lock()
 
     @classmethod
-    def init(cls, name):
+    def init(cls, name:str):
         def decorator(feed_cls):
-            isinstance = feed_cls()  #实例化
-            proxy = FeedProxy(isinstance)  #创建代理
-            cls._feedcls[name] = proxy  #存储代理实例
-            return proxy
+            # --- 单例模式 ---
+            if name in cls._feedcls:
+                return cls._feedcls[name]
+
+            #线程锁，防止多线程创建时重复初始化
+            with cls._lock:
+                if name not in cls._feedcls:
+                    isinstance = feed_cls()  #实例化
+                    proxy = FeedProxy(isinstance)  #创建代理
+                    cls._feedcls[name] = proxy  #存储代理实例
+                    return proxy
         return decorator
     
     @classmethod

@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime
 from common import CONFIG,DATAFRAME
+from .util import datafeed
 
 # 配置路径
 OUTPUT_PATH = CONFIG.base_path['STOCK_OUTPUT_PATH']
@@ -13,6 +14,8 @@ class StockPoolManager:
 
         self.selection_df = self._load_csv(self.POOL_FILE)
         self.deleted_df = self._load_csv(self.DELETED_FILE)
+        self.feed = datafeed.FeedManager.register("tdx")
+        self.feed.init_feed()
 
     def _load_csv(self, path):
         if path.exists():
@@ -77,13 +80,13 @@ class StockPoolManager:
         self._check_exit_conditions()
 
         # --- 第四步：最终持久化与反馈 ---
-        self._write_tdx_blk("股票待选池.blk", self.selection_df['ts_code'].tolist())
-        self._write_tdx_blk("已删股票池.blk", self.deleted_df['ts_code'].tolist())
+        self._write_tdx_blk('DQSY', self.selection_df['ts_code'].tolist())
+        self._write_tdx_blk('DQSC', self.deleted_df['ts_code'].tolist())
         self._save_csv()
 
     def _sync_with_tdx_manual(self):
         """同步通达信板块文件的手工操作"""
-        tdx_codes = self._read_tdx_blk("股票待选池.blk")
+        tdx_codes = self._read_tdx_blk('DQSY')
         csv_codes = self.selection_df['ts_code'].tolist() if not self.selection_df.empty else []
 
         # 1. 手工添加：通达信有，CSV没有
@@ -95,7 +98,7 @@ class StockPoolManager:
 
         # 2. 手工删除：CSV有，通达信没有
         for c in csv_codes:
-            if c not in tdx_codes:
+            if c not in tdx_codes and not tdx_codes.empty:
                 self._do_remove(c, "手工删除")
 
     def _update_all_price_metrics(self, price_provider_func):
@@ -160,15 +163,11 @@ class StockPoolManager:
         self.selection_df = self.selection_df[self.selection_df['ts_code'] != code]
 
     # --- 通达信读写底层 ---
-    def _read_tdx_blk(self, filename):
-        path = self.TDX_BLOCK_PATH/filename
-        if not path.exists(): return []
-        with open(path, 'r') as f:
-            return [line.strip()[-6:] for line in f.readlines() if line.strip()]
+    def _read_tdx_blk(self, block_name=[]):
+        stocklist_df = self.feed.get_stocklist_in_index(sector=block_name, block_type=1)
 
-    def _write_tdx_blk(self, filename, code_list):
-        path = self.TDX_BLOCK_PATH/filename
-        with open(path, 'w') as f:
-            for code in code_list:
-                prefix = '1' if code.startswith(('6', '9')) else '0'
-                f.write(f"{prefix}{code}\n")
+        return stocklist_df
+        
+
+    def _write_tdx_blk(self, block_name, code_list):
+        self.feed.update_block(block_code=block_name, stock_list=code_list)

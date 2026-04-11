@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from scipy.stats import linregress
 from zmq import IntEnum
 from .util import datafeed
-from .st_sectorresonance import Sector
+from .util.sector import Sector
 from common import CONFIG,DATAFRAME
 from .stocklist import StockPoolManager
 
@@ -707,17 +707,21 @@ class TrendStrategyTerm:
             print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
+            
     def run_strategy(self, stocklist_df=None, converged_windwos=4, converged_threshold=2.5, vol_gain=1.5):        
         # A. 监测潜力池 (入场信号)
-        stockpool = StockPoolManager()
         signal_list = []
         tdx_stocklist = []
+
         try:
             srcpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
             full_df = pd.read_parquet(srcpath, engine='pyarrow')
-            selectlist_df = full_df if stocklist_df is None else stocklist_df
+            if stocklist_df is None:
+                fpath = CONFIG.inferred_path['STOCKLIST_PATH']
+                stocklist_df = pd.read_csv(fpath, usecols=[0,2], skiprows=1, header=None) #read_csv返回的DF数据格式
+                stocklist_df.rename(columns={0: 'Code', 2: 'Name'}, inplace=True)
 
-            for index, row in selectlist_df.iterrows():              
+            for index, row in stocklist_df.iterrows():              
                 df = full_df[full_df['symbol']==row['Code']]
 
                 if len(df) < 120: 
@@ -835,12 +839,13 @@ class TrendStrategyTerm:
             result_df.to_csv(self.output_csv, encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f') 
             self.data.update_block(block_code='BKXG', stock_list=tdx_stocklist)
             print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
-            stockpool.add_to_pool(newstock_df=result_df, strategy_name="点火突破")
+            return result_df
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
 
 # --- 执行入口 ---
 if __name__ == "__main__":
+    stockpool = StockPoolManager()
     mysector = Sector()
     feed = mysector.get_feed()
     ts = TrendStrategyTerm(datafeed=feed)
@@ -856,7 +861,8 @@ if __name__ == "__main__":
 
 
     stocklist_df = mysector.get_list_in_sector(sectorlist=sectors_list)
-    ts.run_strategy(stocklist_df=stocklist_df)
+    result_df = ts.run_strategy(stocklist_df=stocklist_df)
+    stockpool.add_to_pool(newstock_df=result_df, strategy_name="点火突破")
     
     
     

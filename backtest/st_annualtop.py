@@ -7,7 +7,7 @@ from functools import partial
 from dataclasses import dataclass, fields, asdict
 from common import CONFIG, DATAFRAME
 
-target_year = 2025
+START_DATE = '2025-10-01'
 
 @dataclass
 class StockResult:
@@ -182,7 +182,9 @@ def process_stock(stock_name, stockdata_path, start_date=''):
         df['date'] = pd.to_datetime(df['date']).astype('datetime64[s]')
         
         # 4. 筛选年份
-        filtered_df = df[df['date'].dt.year == target_year].sort_values('date').reset_index(drop=True)
+        threshold = pd.Timestamp(start_date)
+        filtered_df = df[df['date'] > threshold].sort_values('date').reset_index(drop=True)
+        #df_year = df[df['date'].dt.year == target_year].sort_values('date').reset_index(drop=True)
         
         if filtered_df.empty:
             return None
@@ -289,5 +291,5 @@ def _flush_to_csv(data_list, filename, has_header):
 # 使用示例
 # ==========================================
 if __name__ == "__main__":
-    run_strategy(target_year=target_year)
+    run_strategy(target_year=START_DATE)
 

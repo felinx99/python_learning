@@ -169,6 +169,7 @@ def update_sector_daily():
 
 def download_sector(sectorlist=[]):
     feed = datafeed.FeedManager.register('tdx')
+    assert feed is not None
     feed.init_feed()
     
     pb_data = []
