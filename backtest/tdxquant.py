@@ -89,34 +89,46 @@ tq.initialize(__file__)
 #more_info = tq.get_more_info(stock_code = '688318.SH', field_list=[])
 #print(more_info)
 
-stocklist = ['000935.SZ','600426.SH']
-stock = '000934.SZ'
-formula_set_res = tq.formula_set_data_info(stock_code=stock,stock_period='1d', count=499, dividend_type=1)
+#formula_name = 'MACD'
+#formula_flags = '12,26,9'
+formula_name = 'L2定单分析'
+formula_flags = ''
+
+formula_set_res = tq.formula_set_data_info(stock_code='688318.SH',stock_period='1d', count=20,dividend_type=1)
 #技术指标公式MACD
-formula_zb = tq.formula_zb(formula_name='L2定单分析', formula_arg='')
-print(f"{formula_zb['Data']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb['Data']['HUGE_LIMIT'])}")
+formula_zb = tq.formula_zb(formula_name=formula_name, formula_arg=formula_flags)
+print(formula_zb)
+
+stocklist = ['000935.SZ','600426.SH']
+stock = '000935.SZ'
+refresh_kline = tq.refresh_kline(stock_list=['000935.SZ'],period='1d')
+formula_set_res =  tq.formula_set_data_info(stock_code=stock,stock_period='1d', count=20, dividend_type=1)
+#技术指标公式MACD
+formula_zb = tq.formula_zb(formula_name=formula_name, formula_arg=formula_flags)
+#print(f"{formula_zb['Value']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb['Value']['HUGE_LIMIT'])}")
 
 formula_set_res1 = tq.formula_set_data_info(stock_code=stock,stock_period='1d', count=0,start_time= '20240301', end_time='20260324', dividend_type=1)
 #技术指标公式MACD
-formula_zb1 = tq.formula_zb(formula_name='L2定单分析', formula_arg='')
-print(f"{formula_zb1['Data']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb1['Data']['HUGE_LIMIT'])}")
+formula_zb1 = tq.formula_zb(formula_name=formula_name, formula_arg=formula_flags)
+#print(f"{formula_zb1['Value']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb1['Value']['HUGE_LIMIT'])}")
 
 formula_set_res2 = tq.formula_set_data_info(stock_code=stock,stock_period='1d', count=-1, dividend_type=1)
 #技术指标公式MACD
-formula_zb2 = tq.formula_zb(formula_name='L2定单分析', formula_arg='')
-print(f"{formula_zb2['Data']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb2['Data']['HUGE_LIMIT'])}")
+formula_zb2 = tq.formula_zb(formula_name=formula_name, formula_arg=formula_flags)
+#print(f"{formula_zb2['Value']['HUGE_LIMIT'][-10:]}, len:{len(formula_zb2['Value']['HUGE_LIMIT'])}")
 
+refresh_kline = tq.refresh_kline(stock_list=['688318.SH'],period='1d')
 mul_zb_res = tq.formula_process_mul_zb(
-     formula_name='L2定单分析',
-     formula_arg='',
-     return_count=0,
+     formula_name=formula_name,
+     formula_arg=formula_flags,
+     return_count=10,
      return_date=False,
      stock_list=['688318.SH'],
      stock_period='1d',
      start_time = '20260101',
      end_time = '20260320',
-     count=0,
-     dividend_type=1)
+     count=40,
+     dividend_type=0)
 print(mul_zb_res)
 
 start_time = '20200101' #数据起始时间

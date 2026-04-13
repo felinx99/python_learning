@@ -827,6 +827,7 @@ class TrendStrategyTerm:
                     print(f"✅ 信号触发: {row['Code']} {row['Name']} (突破 {pivot:.2f})")
         except Exception as e:
             print(f"读取潜力池失败: {e}")
+            return pd.DataFrame()
         
         
         # B. 监测持仓池 (离场信号) 逻辑：最高价回落 2.5*ATR 则卖出
@@ -842,6 +843,7 @@ class TrendStrategyTerm:
             return result_df
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
+            return pd.DataFrame()
 
 # --- 执行入口 ---
 if __name__ == "__main__":

@@ -257,6 +257,8 @@ def run_strategy(target_year='', batch_size=1000):
         df_top300.to_csv(top300_filename, index=False, header=True, columns=cols, encoding='utf-8-sig', date_format='%Y-%m-%d', float_format='%.2f')
         print(f"TOP300 已保存至: {top300_filename}")
         return df_top300
+    else:
+        return pd.DataFrame()
     
 def _flush_to_csv(data_list, filename, has_header):
     """

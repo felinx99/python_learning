@@ -18,7 +18,6 @@ class StockPoolManager:
         self.feed.init_feed()
         #先根据通达信 .blk 文件同步手动增删情况，完成“名单更新”
         self._sync_with_tdx_manual()
-        print(self.deleted_df)
 
     def _load_csv(self, path):
         if path.exists():
@@ -101,7 +100,8 @@ class StockPoolManager:
             result_df = self.selection_df[self.selection_df['ts_code'].isin(code_diff)]
             result_df['out_type'] = 'manual'
             self.deleted_df = pd.concat([self.deleted_df, result_df], ignore_index=True)
-            print(self.deleted_df)
+            mask = ~self.selection_df['ts_code'].isin(result_df['ts_code'])
+            self.selection_df = self.selection_df[mask].reset_index(drop=True)
 
 
     def _update_all_price_metrics(self, price_provider_func):
@@ -115,21 +115,18 @@ class StockPoolManager:
             
             # 调用你之前运行的数据模块获取的最新数据
             # 这里的 price_provider_func 应返回从入池日至今的 DataFrame
-            hist = price_provider_func(code, entry_date)
+            start_date = (pd.to_datetime(entry_date) - pd.DateOffset(days=2)).strftime(CONFIG.date_fmt[DATAFRAME['DAY']])
+            hist = price_provider_func(code, start_date)
             
             if hist is not None and not hist.empty:
-                # 如果手动添加的股票没有名称，此处进行补全
-                if row['name'] == 'manual':
-                    self.selection_df.at[idx, 'name'] = hist['name'].iloc[-1] if 'name' in hist.columns else '未知'
-
                 # 计算价格极值
-                max_price = hist['close'].max()
-                max_date = hist['close'].idxmax()
-                min_price = hist['close'].min()
-                min_date = hist['close'].idxmin()
+                max_price = hist['high'].max()
+                max_date = hist['high'].idxmax().strftime('%Y-%m-%d')
+                min_price = hist['low'].min()
+                min_date = hist['low'].idxmin().strftime('%Y-%m-%d')
                 
                 # 最大回撤
-                post_max_series = hist.loc[max_date:]['close']
+                post_max_series = hist.loc[max_date:]['low']
                 max_drawdown = (post_max_series.min() - max_price) / max_price
                 
                 # 赋值
@@ -151,9 +148,9 @@ class StockPoolManager:
             # 条件 1：最高点超过 60 天
             if row['highest_duration'] > 60:
                 self._do_remove(code, "最高点间隔超过60天")
-            # 条件 2：回撤超过 40%
-            elif row['maxdd'] <= -0.4:
-                self._do_remove(code, "从最高点回撤超过40%")
+            # 条件 2：回撤超过 30%
+            elif row['maxdd'] <= -0.3:
+                self._do_remove(code, "从最高点回撤超过30%")
 
     def _do_remove(self, code, reason):
         """执行删除的具体动作"""
