@@ -79,13 +79,13 @@ class StockPoolManager:
         self._check_exit_conditions()
 
         # --- 第三步：最终持久化与反馈 ---
-        self._write_tdx_blk('DQSY', self.selection_df['ts_code'].tolist())
-        self._write_tdx_blk('DQSC', self.deleted_df['ts_code'].tolist())
+        self._write_tdx_blk('ZXG', self.selection_df['ts_code'].tolist())
+        self._write_tdx_blk('ZXSC', self.deleted_df['ts_code'].tolist())
         self._save_csv()
 
     def _sync_with_tdx_manual(self):
         """同步通达信板块的手工操作"""
-        tdx_codes = self._read_tdx_blk('DQSY')
+        tdx_codes = self._read_tdx_blk('ZXG')
         if not tdx_codes.empty:
             set_tdx = set(tdx_codes['Code'])
             set_add = set(self.selection_df['ts_code'])
