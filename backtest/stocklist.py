@@ -22,7 +22,9 @@ class StockPoolManager:
     def _load_csv(self, path):
         if path.exists():
             return pd.read_csv(path, dtype={'ts_code': str})
-        return pd.DataFrame(columns=['ts_code', 'name'])
+        else:
+            col = ['ts_code', 'name', 'indate', 'lowest', 'lowest_date', 'highest', 'highest_date', 'maxdd', 'maxdd_duration', 'highest_duration', 'in_type']
+            return pd.DataFrame(columns=col)
         
     
     def _save_csv(self):
@@ -57,9 +59,9 @@ class StockPoolManager:
 
             # 3. 新增入池记录（此时不计算价格指标，只记录基础信息）
             new_record = {
-                'ts_code': code, 'name': name, 'indate': now, 'in_type': strategy_name,
+                'ts_code': code, 'name': name, 'indate': now,
                 'lowest': None, 'lowest_date': None, 'highest': None, 'highest_date': None,
-                'maxdd': 0.0, 'maxdd_duration': None, 'highest_duration': 0
+                'maxdd': 0.0, 'maxdd_duration': None, 'highest_duration': 0, 'in_type': strategy_name
             }
             self.selection_df = pd.concat([self.selection_df, pd.DataFrame([new_record])], ignore_index=True)
 
@@ -121,13 +123,21 @@ class StockPoolManager:
             if hist is not None and not hist.empty:
                 # 计算价格极值
                 max_price = hist['high'].max()
-                max_date = hist['high'].idxmax().strftime('%Y-%m-%d')
+                max_date_ts = hist['high'].idxmax()
+                max_date = max_date_ts.strftime('%Y-%m-%d')
                 min_price = hist['low'].min()
                 min_date = hist['low'].idxmin().strftime('%Y-%m-%d')
                 
                 # 最大回撤
-                post_max_series = hist.loc[max_date:]['low']
-                max_drawdown = (post_max_series.min() - max_price) / max_price
+                max_drawdown = 0.0
+                maxdd_duration = 0
+                post_max_data = hist[hist.index > max_date_ts]
+                if not post_max_data.empty:
+                    min_price_after_max = post_max_data['low'].min()
+                    max_drawdown = 100*(max_price - min_price_after_max) / max_price
+                    # 最大回撤持续时长
+                    low_date_ts = post_max_data['low'].idxmin()
+                    maxdd_duration = hist.index.get_loc(low_date_ts) - hist.index.get_loc(max_date_ts)
                 
                 # 赋值
                 self.selection_df.at[idx, 'highest'] = max_price
@@ -135,6 +145,7 @@ class StockPoolManager:
                 self.selection_df.at[idx, 'lowest'] = min_price
                 self.selection_df.at[idx, 'lowest_date'] = min_date
                 self.selection_df.at[idx, 'maxdd'] = max_drawdown
+                self.selection_df.at[idx, 'maxdd_duration'] = maxdd_duration
                 self.selection_df.at[idx, 'highest_duration'] = (today - pd.to_datetime(max_date)).days
 
     def _check_exit_conditions(self):
