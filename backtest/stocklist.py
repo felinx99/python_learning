@@ -55,7 +55,11 @@ class StockPoolManager:
 
             # 2. 如果在删除池，则移出（准备重新入池）
             if not self.deleted_df.empty and code in self.deleted_df['ts_code'].values:
-                self.deleted_df = self.deleted_df[self.deleted_df['ts_code'] != code]
+                if strategy_name == '年度涨幅TOP300':
+                    continue
+                else:
+                    self.deleted_df = self.deleted_df[self.deleted_df['ts_code'] != code]
+                    strategy_name = strategy_name + "重返"
 
             # 3. 新增入池记录（此时不计算价格指标，只记录基础信息）
             new_record = {

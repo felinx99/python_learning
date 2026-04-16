@@ -112,7 +112,7 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
     #combo_file={'1-combo':set(), '2-combo':set(), '3-combo':set(), '4-combo':set(), '5-combo':set()}
     
     # process newone
-    self.spot_filepath = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'spot_{dtstr}.txt')
+    self.spot_filepath = CONFIG.inferred_path['RESULT_PATH']/f'spot_{dtstr}.txt'
     with open(self.spot_filepath, 'w') as f:
         f.write('\n'.join(spot_list))
     
@@ -126,44 +126,44 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
     combo_file = newset
 
     if len(self.spot_filelist) >= 7:   #1连             
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-2]), 'r') as f1:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[-2], 'r') as f1:
             oldset = set(f1.read().splitlines())
         #deal with combo
         combo_file = oldset & combo_file
 
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-3]), 'r') as f1:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[-3], 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
     
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-4]), 'r') as f1:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[-4], 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-5]), 'r') as f1:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[-5], 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-6]), 'r') as f1:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[-6], 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-7]), 'r') as f1:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[-7], 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
         """
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-8]), 'r') as f1:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[-8], 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = oldset & combo_file
 
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[-9]), 'r') as f1:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[-9], 'r') as f1:
             oldset = set(f1.read().splitlines())
         combo_file = combo_file - oldset
         """
         
         # save combo file
         if combo_file:
-            self.combo_filepath = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'combo_{dtstr}.txt')
+            self.combo_filepath = CONFIG.inferred_path['RESULT_PATH']/f'combo_{dtstr}.txt'
 
             combo_list = list(combo_file)
             try:
@@ -174,7 +174,7 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
 
     '''
     if combo_file:
-        self.combo_filepath = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'combo_{dtstr}.txt')
+        self.combo_filepath = CONFIG.inferred_path['RESULT_PATH']/f'combo_{dtstr}.txt'
         self.combo_filelist.append(f'combo_{dtstr}.txt')
 
         target_keys = ['5-combo', '4-combo', '3-combo']
@@ -182,7 +182,7 @@ def judge_uptrend(self, dtstr='', spot_list=[]):
 
         if len(self.combo_filelist) >= 2:
             try:
-                with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.combo_filelist[-2]), 'r', encoding='utf-8-sig') as f1:
+                with open(CONFIG.inferred_path['RESULT_PATH']/self.combo_filelist[-2], 'r', encoding='utf-8-sig') as f1:
                     oldcombo = json.load(f1)
             except Exception as e:
                 print(f"read combo file error: {e}")              
@@ -208,7 +208,7 @@ def judge_uptrend_most(self):
     spotUnionList = []
     for idx, spotfile in enumerate(self.spot_filelist):
         idx_r = -(idx+1)
-        with open(os.path.join(CONFIG.inferred_path['RESULT_PATH'], self.spot_filelist[idx_r]), 'r') as fr:
+        with open(CONFIG.inferred_path['RESULT_PATH']/self.spot_filelist[idx_r], 'r') as fr:
                 curList = fr.read().splitlines()
         if idx == 0:
             spotUnionList = curList
@@ -221,26 +221,24 @@ def judge_uptrend_most(self):
             spotUnion20cur_sorted = spotUnion_counts.most_common()
             #spotUnion_sorted = [(element, count) for element, count in spotUnion_counts.most_common() if count > 10]
             spotUnion20cur_save = dict(spotUnion20cur_sorted)
-            spotUnion_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'most20_cur.txt')
+            spotUnion_fname = CONFIG.inferred_path['RESULT_PATH']/'most20_cur.txt'
             with open(spotUnion_fname, 'w', encoding='utf-8-sig') as fw:
                 json.dump(spotUnion20cur_save, fw, indent=4)
             #为统计最近1个月数据做准备
             spotUnion20cur_counter = Counter(spotUnion20cur_save)
 
-            up_fname = os.path.join(os.path.dirname(CONFIG.inferred_path['RESULT_PATH']), f'most20_cur.txt')
-            shutil.copy(spotUnion_fname, up_fname)
+            shutil.copy(spotUnion_fname, spotUnion_fname.parents[1]/spotUnion_fname.name)
 
         if idx==40:
             spotUnion_sorted = spotUnion_counts.most_common()
             #保存最近2个月连涨股票               
             spotUnion_save = dict(spotUnion_sorted)
-            spotUnion_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'most40.txt')
+            spotUnion_fname = CONFIG.inferred_path['RESULT_PATH']/'most40.txt'
 
             with open(spotUnion_fname, 'w', encoding='utf-8-sig') as fw:
                 json.dump(spotUnion_save, fw, indent=4)
 
-            up_fname = os.path.join(os.path.dirname(CONFIG.inferred_path['RESULT_PATH']), f'most40.txt')
-            shutil.copy(spotUnion_fname, up_fname)
+            shutil.copy(spotUnion_fname, spotUnion_fname.parents[1]/spotUnion_fname.name)
 
         if idx == 21:
             spotUnion20List = curList
@@ -254,7 +252,7 @@ def judge_uptrend_most(self):
             #spotUnion_sorted = [(element, count) for element, count in spotUnion_counts.most_common() if count > 10]
             #spotUnion_counter20 = Counter(dict(spotUnion_sorted))
             spotUnion20pre_save = dict(spotUnion20pre_sorted)
-            spotUnion_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'most20_pre.txt')
+            spotUnion_fname = CONFIG.inferred_path['RESULT_PATH']/'most20_pre.txt'
             with open(spotUnion_fname, 'w', encoding='utf-8-sig') as fw:
                 json.dump(spotUnion20pre_save, fw, indent=4)
             #保存最近1个月新出现的连涨股票
@@ -272,12 +270,11 @@ def judge_uptrend_most(self):
             result_counter = Counter(result)
             result_sorted = result_counter.most_common()
             result_dict = dict(result_sorted)
-            spotUnion_new_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'most20_new.txt')
+            spotUnion_new_fname = CONFIG.inferred_path['RESULT_PATH']/'most20_new.txt'
             with open(spotUnion_new_fname, 'w', encoding='utf-8-sig') as fw:
                 json.dump(result_dict, fw, indent=4)
 
-            up_fname = os.path.join(os.path.dirname(CONFIG.inferred_path['RESULT_PATH']), f'most20_new.txt')
-            shutil.copy(spotUnion_new_fname, up_fname)
+            shutil.copy(spotUnion_new_fname, spotUnion_new_fname.parents[1]/spotUnion_new_fname.name)
 
         if idx > 41:
             break
@@ -501,7 +498,7 @@ class SmaCross(bt.SignalStrategy):
             judge_uptrend(self, dtstr=dtstr, spot_list=spot_list)
         
         if vratio_list:
-            self.vratio_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'vratio_{dtstr}.txt')
+            self.vratio_fname = CONFIG.inferred_path['RESULT_PATH']/f'vratio_{dtstr}.txt'
             with open(self.vratio_fname, 'w') as fw:
                 fw.write('\n'.join(vratio_list))
 
@@ -509,7 +506,7 @@ class SmaCross(bt.SignalStrategy):
         if boxbreakup:
             sortedbox = sorted(boxbreakup, key=lambda x: x['box']['consolidaDays'], reverse=True)
             sortedbox_list = [(item ['stock'], item['box']['consolidaDays'], item['box']['startdate'], item['box']['boxHigh'], item['box']['boxLow']) for item  in sortedbox]
-            self.box_fname = os.path.join(CONFIG.inferred_path['RESULT_PATH'], f'boxup_{dtstr}.txt')
+            self.box_fname = CONFIG.inferred_path['RESULT_PATH']/f'boxup_{dtstr}.txt'
             with open(self.box_fname, 'w') as f:
                 for item in sortedbox_list:
                     f.write(str(item) + '\n')
@@ -523,21 +520,13 @@ class SmaCross(bt.SignalStrategy):
 
         #拷贝最新box策略结果 
         if self.box_fname:
-            cdir = os.path.dirname(self.box_fname) 
-            cdir_p = os.path.dirname(cdir)
-            fname = os.path.basename(self.box_fname) # 获取文件名 'a.txt'
-            d_fpath = os.path.join(cdir_p, fname) 
-            shutil.copy(self.box_fname, d_fpath)
+            shutil.copy(self.box_fname, self.box_fname.parents[1]/self.box_fname.name)
         #拷贝最新volume策略结果
         if self.vratio_fname:
-            fname = os.path.basename(self.vratio_fname)
-            d_fpath = os.path.join(cdir_p, fname)
-            shutil.copy(self.vratio_fname, d_fpath)
+            shutil.copy(self.vratio_fname, self.vratio_fname.parents[1]/self.vratio_fname.name)
         #拷贝最新的combo_uptrend策略结果
         if self.combo_filepath:
-            fname = os.path.basename(self.combo_filepath)
-            d_fpath = os.path.join(cdir_p, fname)
-            shutil.copy(self.combo_filepath, d_fpath)
+            shutil.copy(self.combo_filepath, self.combo_filepath.parents[1]/self.combo_filepath.name)
         
         print('-------------     finished      --------------')
         print(f'total process: {len(self.datas)} datas')
@@ -547,7 +536,7 @@ class SmaCross(bt.SignalStrategy):
 
 
 
-def runstrat(**kwargs):  
+def run_strategy(**kwargs):  
     # Create a cerebro entity
     cerebro = bt.Cerebro(stdstats=False)
 
@@ -613,9 +602,8 @@ if __name__ == '__main__':
     if TICKERS:
         STRATEGY_ARGS['tickers'] = [ticker.strip() for ticker in TICKERS[0].split(',')]
     else:
-        csvpath = os.path.dirname(CONFIG.inferred_path['RESULT_PATH'])
-        TICKER_CSV_PATH = os.path.join(os.path.dirname(csvpath), 'stocklist.csv')
-        assert os.path.exists(TICKER_CSV_PATH), f"Error: '{TICKER_CSV_PATH}'"
+        TICKER_CSV_PATH = CONFIG.inferred_path['STOCKLIST_PATH']
+        assert TICKER_CSV_PATH.exists(), f"Error: '{TICKER_CSV_PATH}'"
         TICKERS_DF = pd.read_csv(TICKER_CSV_PATH, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式
         # 单列转换
         # TICKERS = TICKERS_DF.iloc[1:, 0].tolist()   #第0列，取第一列数据，并转为list格式
@@ -629,4 +617,4 @@ if __name__ == '__main__':
     if EXCLUDE:
         STRATEGY_ARGS['exclude'] = [EXCLUDE] if len(EXCLUDE) == 1 else EXCLUDE
         
-    runstrat(**STRATEGY_ARGS)
+    run_strategy(**STRATEGY_ARGS)
