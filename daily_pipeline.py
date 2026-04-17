@@ -47,6 +47,13 @@ def run_pipeline():
         'plot': {'plot': True, 'volume': False},
     }
 
+    STOCKLIST_FILE = CONFIG.base_path['STOCK_OUTPUT_PATH']/'stocklist.csv'
+    assert STOCKLIST_FILE.exists(), f"Error: '{STOCKLIST_FILE}'"
+    df_stocklist = pd.read_csv(STOCKLIST_FILE, usecols=[0,5], skiprows=1, header=None, dtype={0: str}) #read_csv返回的DF数据格式
+    stock_list = list(df_stocklist.to_records(index=False))
+
+    boxconfig['tickers'] = stock_list
+
     try:
         # 第一步：数据更新
         logging.info("步骤 1: 正在更新本地行情数据...")
