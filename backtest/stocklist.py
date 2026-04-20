@@ -44,6 +44,7 @@ class StockPoolManager:
         for _, row in newstock_df.iterrows():
             code = row['Code']
             name = row['Name']
+            new_record_name = strategy_name
             
             # 1. 查重处理
             if not self.selection_df.empty and code in self.selection_df['ts_code'].values:
@@ -59,13 +60,13 @@ class StockPoolManager:
                     continue
                 else:
                     self.deleted_df = self.deleted_df[self.deleted_df['ts_code'] != code]
-                    strategy_name = strategy_name + "重返"
+                    new_record_name = strategy_name + "重返"
 
             # 3. 新增入池记录（此时不计算价格指标，只记录基础信息）
             new_record = {
                 'ts_code': code, 'name': name, 'indate': now,
                 'lowest': None, 'lowest_date': None, 'highest': None, 'highest_date': None,
-                'maxdd': 0.0, 'maxdd_duration': None, 'highest_duration': 0, 'in_type': strategy_name
+                'maxdd': 0.0, 'maxdd_duration': None, 'highest_duration': 0, 'in_type': new_record_name
             }
             self.selection_df = pd.concat([self.selection_df, pd.DataFrame([new_record])], ignore_index=True)
 
