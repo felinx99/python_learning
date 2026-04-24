@@ -86,8 +86,8 @@ class StockPoolManager:
         self._check_exit_conditions()
 
         # --- 第三步：最终持久化与反馈 ---
-        self._write_tdx_blk('ZXG', self.selection_df['ts_code'].tolist())
         self._write_tdx_blk('ZXSC', self.deleted_df['ts_code'].tolist())
+        self._write_tdx_blk('ZXG', self.selection_df['ts_code'].tolist())
         self._save_csv()
 
     def _sync_with_tdx_manual(self):
