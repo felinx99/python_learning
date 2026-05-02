@@ -23,7 +23,7 @@ class StockPoolManager:
         if path.exists():
             return pd.read_csv(path, dtype={'ts_code': str})
         else:
-            col = ['ts_code', 'name', 'indate', 'lowest', 'lowest_date', 'highest', 'highest_date', 'maxdd', 'maxdd_duration', 'highest_duration', 'in_type']
+            col = ['ts_code', 'name', 'indate', 'max_gains', 'cur_gains', 'lowest', 'lowest_date', 'highest', 'highest_date', 'maxdd', 'maxdd_duration', 'highest_duration', 'in_type']
             return pd.DataFrame(columns=col)
         
     
@@ -64,7 +64,7 @@ class StockPoolManager:
 
             # 3. 新增入池记录（此时不计算价格指标，只记录基础信息）
             new_record = {
-                'ts_code': code, 'name': name, 'indate': now,
+                'ts_code': code, 'name': name, 'indate': now, 'max_gains': 0.0, 'cur_gains': 0.0,
                 'lowest': None, 'lowest_date': None, 'highest': None, 'highest_date': None,
                 'maxdd': 0.0, 'maxdd_duration': None, 'highest_duration': 0, 'in_type': new_record_name
             }
@@ -131,8 +131,14 @@ class StockPoolManager:
                 max_date_ts = hist['high'].idxmax()
                 max_date = max_date_ts.strftime('%Y-%m-%d')
                 min_price = hist['low'].min()
-                min_date = hist['low'].idxmin().strftime('%Y-%m-%d')
-                
+                min_date_ts = hist['low'].idxmin()
+                min_date = min_date_ts.strftime('%Y-%m-%d')
+
+                # 计算最大涨幅和当前涨幅
+                ref_close = float(hist['close'].iloc[0])
+                max_gains = 100.0 * (max_price-ref_close) / ref_close
+                cur_gains = 100.0 * (hist['close'].iloc[-1]-ref_close) / ref_close
+
                 # 最大回撤
                 max_drawdown = 0.0
                 maxdd_duration = 0
@@ -152,6 +158,8 @@ class StockPoolManager:
                 self.selection_df.at[idx, 'maxdd'] = max_drawdown
                 self.selection_df.at[idx, 'maxdd_duration'] = maxdd_duration
                 self.selection_df.at[idx, 'highest_duration'] = (today - pd.to_datetime(max_date)).days
+                self.selection_df.at[idx, 'max_gains'] = max_gains
+                self.selection_df.at[idx, 'cur_gains'] = cur_gains
 
     def _check_exit_conditions(self):
         """执行出池判定逻辑"""

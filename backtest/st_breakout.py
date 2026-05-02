@@ -704,7 +704,7 @@ class TrendStrategyTerm:
         if signal_list:
             result_df = pd.DataFrame(signal_list)
             result_df.to_csv(self.output_csv, index=False, encoding='utf-8-sig') # utf-8-sig 保证 Excel 打开不乱码
-            print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
+            print(f"\n📂 监测完成:{len(signal_list)}！已生成信号报表: {self.output_csv}")
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
             
