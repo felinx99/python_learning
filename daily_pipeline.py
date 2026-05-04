@@ -33,26 +33,6 @@ def price_loader(code, start_date):
 
 def run_pipeline():
     logging.info("=== 每日流水线开始执行 ===")
-    boxconfig = {
-        'runmode': 'backtest',
-        'strategy': 'MACD',
-        'datatype': 'file', 
-        'start': '20240101', 
-        'end': '20261231', 
-        'cash': 100000, 
-        'verbose': True, 
-        'tickers': [], 
-        'plotreturns': False,
-        'kwargs': {'riskfreerate': 0.035, 'cheat_on_open': True}, 
-        'plot': {'plot': True, 'volume': False},
-    }
-
-    STOCKLIST_FILE = CONFIG.base_path['STOCK_OUTPUT_PATH']/'stocklist.csv'
-    assert STOCKLIST_FILE.exists(), f"Error: '{STOCKLIST_FILE}'"
-    df_stocklist = pd.read_csv(STOCKLIST_FILE, usecols=[0,5], skiprows=1, header=None, dtype={0: str}) #read_csv返回的DF数据格式
-    stock_list = list(df_stocklist.to_records(index=False))
-
-    boxconfig['tickers'] = stock_list
 
     try:
         # 第一步：数据更新
@@ -72,8 +52,8 @@ def run_pipeline():
 
         # 策略 B: 箱体理论
         logging.info("步骤 2.2: 运行 [箱体突破] 策略...")
-        st_boxtheory.run_strategy(**boxconfig)
-        #manager.add_to_pool(df_box, "箱体突破")
+        df_box = st_boxtheory.run_strategy()
+        manager.add_to_pool(df_box, "箱体突破")
 
         # 策略 C: 年度涨幅 TOP300
         logging.info("步骤 2.3: 运行 [年度涨幅TOP300] 策略...")

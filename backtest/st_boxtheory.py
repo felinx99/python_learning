@@ -30,6 +30,7 @@ import time
 import pytz
 import pandas as pd
 import json
+import ast
 from collections import Counter
 
 import backtrader as bt
@@ -86,12 +87,12 @@ def add_data(cerebro=None, **kwargs):
     
     if datatype == 'file':
         # Set up data feed
-        for ticker, listdate in tickers:
+        for ticker, name, listdate in tickers:
             
             tickerpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/f'{ticker}.csv'
             data = bt.feeds.stockCSVData(
                 name = ticker,
-                dataname=tickerpath,
+                dataname=tickerpath, #此处必须赋值数据文件路径
                 fromdate=fromdate,
                 todate=todate,
                 timeframe=bt.TimeFrame.Days,
@@ -318,7 +319,7 @@ def judge_boxbreakout(self, breakt=(), dtstr='', d=None, mid=0):
             pass
         else:
             set_box(box=d.dynamicbox, hl_tuple=(curhigh, curlow), date=dtstr, mode=1)
-    elif d.dynamicbox['consolidaDays'] < CONFIG.params['BOX_PERIOD']/2.2:
+    elif d.dynamicbox['consolidaDays'] < CONFIG.params['BOX_INIT_PERIOD']:
         #BOX生成部分：继续生成或重新生成
         newboxh = max(d.dynamicbox['boxHigh'], curhigh)
         newboxl = min(d.dynamicbox['boxLow'], curlow)
@@ -481,7 +482,8 @@ class SmaCross(bt.SignalStrategy):
         boxbreakup = []
         boxbreakdown = []
         vratio_list = []
-
+        self.box_fname = None
+        self.vratio_fname = None
         
         for idx, d in enumerate(self.datas):
             idx += 1
@@ -536,7 +538,7 @@ class SmaCross(bt.SignalStrategy):
 
 
 
-def run_strategy(**kwargs):  
+def runstrat(**kwargs):  
     # Create a cerebro entity
     cerebro = bt.Cerebro(stdstats=False)
 
@@ -560,7 +562,38 @@ def run_strategy(**kwargs):
 
     #cerebro.plot(style="candle")
 
-    pass
+    return cerebro
+
+def run_strategy():
+    boxconfig = {
+        'runmode': 'backtest',
+        'strategy': 'MACD',
+        'datatype': 'file', 
+        'start': '20240101', 
+        'end': '20261231', 
+        'cash': 100000, 
+        'verbose': True, 
+        'tickers': [], 
+        'plotreturns': False,
+        'kwargs': {'riskfreerate': 0.035, 'cheat_on_open': True}, 
+        'plot': {'plot': True, 'volume': False},
+    }
+
+    STOCKLIST_FILE = CONFIG.base_path['STOCK_OUTPUT_PATH']/'stocklist.csv'
+    assert STOCKLIST_FILE.exists(), f"Error: '{STOCKLIST_FILE}'"
+    df_stocklist = pd.read_csv(STOCKLIST_FILE, usecols=[0,2,5], dtype={0: str}).rename(columns={'ts_code': 'Code', 'name': 'Name'})
+    stock_list = list(df_stocklist.to_records(index=False))
+
+    boxconfig['tickers'] = stock_list
+    cerebro = runstrat(**boxconfig)
+    df_newlist = pd.DataFrame(columns=['Code', 'Name'])
+    if cerebro.runstrats[0][0].box_fname:
+        with open(cerebro.runstrats[0][0].box_fname, 'r') as f1:
+            oldlist = f1.read().splitlines()
+        newlist = [ast.literal_eval(item)[0] for item in oldlist]
+        df_newlist = pd.DataFrame(newlist, columns=['Code'])
+        df_newlist = pd.merge(df_newlist, df_stocklist, on='Code', how='left')
+    return df_newlist
 
 
 if __name__ == '__main__':
@@ -604,7 +637,7 @@ if __name__ == '__main__':
     else:
         TICKER_CSV_PATH = CONFIG.inferred_path['STOCKLIST_PATH']
         assert TICKER_CSV_PATH.exists(), f"Error: '{TICKER_CSV_PATH}'"
-        TICKERS_DF = pd.read_csv(TICKER_CSV_PATH, usecols=[0,5], skiprows=1, header=None) #read_csv返回的DF数据格式
+        TICKERS_DF = pd.read_csv(TICKER_CSV_PATH, usecols=[0,2,5], skiprows=1, header=None) #read_csv返回的DF数据格式
         # 单列转换
         # TICKERS = TICKERS_DF.iloc[1:, 0].tolist()   #第0列，取第一列数据，并转为list格式
         # 多列转换为tuple列表
@@ -617,4 +650,4 @@ if __name__ == '__main__':
     if EXCLUDE:
         STRATEGY_ARGS['exclude'] = [EXCLUDE] if len(EXCLUDE) == 1 else EXCLUDE
         
-    run_strategy(**STRATEGY_ARGS)
+    runstrat(**STRATEGY_ARGS)
