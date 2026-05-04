@@ -7,7 +7,7 @@ from common import CONFIG
 import sys
 sys.path.append(CONFIG.inferred_path['TDX_INSTALL_QUANT'])
 from tqcenter import tq # type: ignore
-
+import unicodedata
 
 def calculate_average_correlation_numpy(df):
     # 1. 将 DataFrame 转换为 NumPy 数组
@@ -47,7 +47,21 @@ def data_to_df(data):
 
 #初始化
 tq.initialize(__file__)
+'''
+print(unicodedata.name('✅'))
+print(unicodedata.name('❌'))
 
+keywords = ["CHECK", "FLAG", "FOLDER", "MARK", "CHART"]
+for i in range(0x0, 0xFFFFFF): # 缩小范围到常用 Emoji 区块，速度更快
+    try:
+        char = chr(i)
+        name = unicodedata.name(char)
+        if any(k in name for k in keywords):
+            print(f"{char} : {name}")
+    except ValueError:
+        continue
+pass
+'''
 # 测试自定义板块相关
 #user_list = tq.get_user_sector()
 #print(f"self_sector,totla({len(user_list)}):{'\n'} {user_list}")

@@ -1,5 +1,6 @@
 import logging
 import os
+import talib as ta
 from datetime import datetime
 import pandas as pd
 
@@ -28,6 +29,7 @@ def price_loader(code, start_date):
     file_path = CONFIG.tdx_data_path[DATAFRAME['DAY']]/f'{code}.csv'
     if os.path.exists(file_path):
         df = pd.read_csv(file_path, index_col='date', parse_dates=True)
+        df['atr'] = ta.ATR(df['high'], df['low'], df['close'], timeperiod=CONFIG.params['ATR_WINDOW'])
         return df.loc[start_date:]
     return None
 

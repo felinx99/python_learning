@@ -3,6 +3,10 @@ from datetime import datetime
 from common import CONFIG,DATAFRAME
 from .util import datafeed
 
+# 与 st_breakout.TrendStrategyTerm 吊灯止损一致：N 日最高高 − k×ATR(N)
+CHANDELIER_ATR_PERIOD = 10
+CHANDELIER_ATR_MULT = 2.5
+
 # 配置路径
 OUTPUT_PATH = CONFIG.base_path['STOCK_OUTPUT_PATH']
 
@@ -31,6 +35,13 @@ class StockPoolManager:
         self.selection_df.to_csv(self.POOL_FILE, sep=',', encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f')
         self.deleted_df.to_csv(self.DELETED_FILE, encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f')
 
+    def _compute_chandelier_exit():
+        """多头吊灯止损价：最近 atr_period 日最高价 − atr_mult × ATR(atr_period)。"""
+        last_atr = atr[-1]
+        if last_atr is None or np.isnan(last_atr):
+            return np.nan
+        hh = float(hist["high"].rolling(atr_period).max().iloc[-1])
+        return hh - atr_mult * float(last_atr)
     # --- 调整 1：批量入池接口 ---
     def add_to_pool(self, newstock_df=None, strategy_name=''):
         """
@@ -66,7 +77,7 @@ class StockPoolManager:
             new_record = {
                 'ts_code': code, 'name': name, 'indate': now, 'max_gains': 0.0, 'cur_gains': 0.0,
                 'lowest': None, 'lowest_date': None, 'highest': None, 'highest_date': None,
-                'maxdd': 0.0, 'maxdd_duration': None, 'highest_duration': 0, 'in_type': new_record_name
+                'maxdd': 0.0, 'maxdd_duration': None, 'highest_duration': 0, 'chandelier_loss': 0.0, 'in_type': new_record_name
             }
             self.selection_df = pd.concat([self.selection_df, pd.DataFrame([new_record])], ignore_index=True)
 
@@ -149,6 +160,11 @@ class StockPoolManager:
                     # 最大回撤持续时长
                     low_date_ts = post_max_data['low'].idxmin()
                     maxdd_duration = hist.index.get_loc(low_date_ts) - hist.index.get_loc(max_date_ts)
+
+                # 动态吊灯止损价
+                last_atr = hist['atr'].iloc[-1]
+                hh = hist["high"].rolling(CONFIG.params['ATR_WINDOW']).max().iloc[-1]
+                chandelier_exitprice = hh - CONFIG.params['ATR_MULT'] * last_atr
                 
                 # 赋值
                 self.selection_df.at[idx, 'highest'] = max_price
@@ -160,6 +176,7 @@ class StockPoolManager:
                 self.selection_df.at[idx, 'highest_duration'] = (today - pd.to_datetime(max_date)).days
                 self.selection_df.at[idx, 'max_gains'] = max_gains
                 self.selection_df.at[idx, 'cur_gains'] = cur_gains
+                self.selection_df.at[idx, 'chandelier_loss'] = chandelier_exitprice
 
     def _check_exit_conditions(self):
         """执行出池判定逻辑"""
@@ -169,14 +186,19 @@ class StockPoolManager:
         temp_df = self.selection_df.copy()
         for _, row in temp_df.iterrows():
             code = row['ts_code']
+            name = row['name']
             # 条件 1：最高点超过 60 天
             if row['highest_duration'] > 60:
-                self._do_remove(code, "最高点间隔超过60天")
+                self._do_remove(code, name, "最高点间隔超过60天")
             # 条件 2：回撤超过 30%
             elif row['maxdd'] <= -0.3:
-                self._do_remove(code, "从最高点回撤超过30%")
+                self._do_remove(code, name, "从最高点回撤超过30%")
+            # 条件 3：吊灯止损触发
+            elif row['close'] < temp_df['chandelier_loss'].iloc[-1]:
+                reason = f"吊灯止损触发(Close:{row['close']:.2f} < Exit:{temp_df['chandelier_loss'].iloc[-1]:.2f})"
+                self._do_remove(code, name, reason)
 
-    def _do_remove(self, code, reason):
+    def _do_remove(self, code, name, reason):
         """执行删除的具体动作"""
         target_row = self.selection_df[self.selection_df['ts_code'] == code].iloc[0].to_dict()
         target_row['out_type'] = reason
@@ -185,6 +207,8 @@ class StockPoolManager:
         
         self.deleted_df = pd.concat([self.deleted_df, pd.DataFrame([target_row])], ignore_index=True)
         self.selection_df = self.selection_df[self.selection_df['ts_code'] != code]
+
+        print(f"❌ 股票删除: {code} {name} (原因: {reason})")
 
     # --- 通达信读写底层 ---
     def _read_tdx_blk(self, block_name=[]):
