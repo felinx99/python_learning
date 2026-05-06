@@ -839,7 +839,7 @@ class TrendStrategyTerm:
             self.output_csv = CONFIG.inferred_path['AISTOCKPICK_RESULT_PATH']/f"breakout_{self.today}.csv"
             result_df.to_csv(self.output_csv, encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f') 
             self.data.update_block(block_code='BKXG', stock_list=tdx_stocklist)
-            print(f"\n📂 监测完成！已生成信号报表: {self.output_csv}")
+            print(f"\n📂 监测完成:{len(signal_list)}！已生成信号报表: {self.output_csv}")
             return result_df
         else:
             print("\n🏁 监测完成，今日无符合条件的突破信号。")
