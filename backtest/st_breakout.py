@@ -824,7 +824,7 @@ class TrendStrategyTerm:
                     }
                     signal_list.append(signal_data)
                     tdx_stocklist.append(row['Code'])
-                    print(f"✅ 信号触发: {row['Code']} {row['Name']} (突破 {pivot:.2f})")
+                    print(f"✅ 点火突破: {row['Code']} {row['Name']} (突破 {pivot:.2f})")
         except Exception as e:
             print(f"读取潜力池失败: {e}")
             return pd.DataFrame()

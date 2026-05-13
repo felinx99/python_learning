@@ -154,6 +154,7 @@ class StockPoolManager:
                 last_atr = hist['atr'].iloc[-1]
                 hh = hist["high"].rolling(CONFIG.params['ATR_WINDOW']).max().iloc[-1]
                 chandelier_exitprice = hh - CONFIG.params['ATR_MULT'] * last_atr
+                chandelier_exitprice = round(float(chandelier_exitprice), 2) if pd.notna(chandelier_exitprice) else 0.0
                 
                 # 赋值
                 self.selection_df.at[idx, 'highest'] = max_price
@@ -165,7 +166,7 @@ class StockPoolManager:
                 self.selection_df.at[idx, 'highest_duration'] = (today - pd.to_datetime(max_date)).days
                 self.selection_df.at[idx, 'max_gains'] = max_gains
                 self.selection_df.at[idx, 'cur_gains'] = cur_gains
-                self.selection_df.at[idx, 'chandelier_loss'] = (hist['close'].iloc[-1], chandelier_exitprice)
+                self.selection_df.at[idx, 'chandelier_loss'] = (float(hist['close'].iloc[-1]), chandelier_exitprice)
 
     def _check_exit_conditions(self):
         """执行出池判定逻辑"""

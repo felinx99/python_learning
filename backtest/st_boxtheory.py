@@ -593,6 +593,9 @@ def run_strategy():
         newlist = [ast.literal_eval(item)[0] for item in oldlist]
         df_newlist = pd.DataFrame(newlist, columns=['Code'])
         df_newlist = pd.merge(df_newlist, df_stocklist, on='Code', how='left')
+
+        for  index, row in df_newlist.iterrows():
+            print(f"✅ 箱体突破: {row['Code']} {row['Name']} ")
     return df_newlist
 
 
