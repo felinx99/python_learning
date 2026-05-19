@@ -6,7 +6,7 @@ import threading
 from datetime import datetime, timedelta
 from common import CONFIG
 import sys
-sys.path.append(CONFIG.inferred_path['TDX_INSTALL_QUANT'])
+sys.path.append(str(CONFIG.inferred_path['TDX_INSTALL_QUANT']))
 from tqcenter import tq # type: ignore
 
 class FeedBase(ABC):
