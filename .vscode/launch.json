@@ -159,7 +159,7 @@
         },
 
         {
-            "name": "backtest: trendup_finder",
+            "name": "Level2: Level2 analysis",
             "type": "debugpy",
             "console": "integratedTerminal",
             "request": "launch",
