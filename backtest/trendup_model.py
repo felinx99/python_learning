@@ -132,8 +132,8 @@ snapshot_schema = pa.schema([
     ('TradingDay', pa.int32()),
     ('Turnover', pa.float64()), 
     ('Volume', pa.int64()), 
-    ('WeightAskPrice', pa.int32()), 
-    ('WeightBidPrice', pa.int32()), 
+    ('WeightAskPrice', pa.float32()), 
+    ('WeightBidPrice', pa.float32()), 
     #('__index_level_0__', pa.int64()),
     # ... 你可以根据需要把所有百个字段写全
 ])
@@ -556,13 +556,13 @@ def process_single_stock_day(date, stock_code):
         
     # 1. 融合时序
     #df_all = load_and_merge_orderflow(order_file, deal_file, snapshot_file)
-    df_all = playback_and_rebuild(order_file, deal_file, snapshot_file)
+    df_all = playback_and_rebuild(order_file, deal_file, snapshot_file, date=date)
     # 2. 动态重构并提取特征
     #daily_feature_dict = rebuild_order_book_and_extract(df_all)
     
     return daily_feature_dict
 
-def stream_l2_timeline(order_file, deal_file, snapshot_file, batch_size=50000):
+def stream_l2_timeline(order_file, deal_file, snapshot_file, batch_size=50000, date=20260101):
     """
     流式双指针归并：同时拉取订单流与成交流，就地按照时间线对齐。
     """
@@ -576,10 +576,10 @@ def stream_l2_timeline(order_file, deal_file, snapshot_file, batch_size=50000):
 
     #df_order = pd.read_parquet(order_file, schema=order_schema, columns=order_columns, filters=[('TradingDay', '==', 20260529)])   
     #df_deal = pd.read_parquet(deal_file, schema=deal_schema, columns=deal_columns, filters=[('TradingDay', '==', 20260529)])
-    #df_snapshot = pd.read_parquet(snapshot_file, schema=snapshot_schema, filters=[('TradingDay', '==', 20260529)])  
-    order_stream = stream_from_parquet(order_file, schema=order_schema, cols=order_columns, batch_size=batch_size, filters=(ds.field('TradingDay') == 20260529))
-    deal_stream = stream_from_parquet(deal_file, schema=deal_schema, cols=deal_columns, batch_size=batch_size, filters=(ds.field('TradingDay') == 20260529))
-    snapshot_stream = stream_from_parquet(snapshot_file, schema=snapshot_schema, cols=snapshot_columns, batch_size=batch_size, filters=(ds.field('TradingDay') == 20260529))
+    #df_snapshot = pd.read_parquet(snapshot_file, columns=snapshot_columns, schema=snapshot_schema, filters=[('TradingDay', '==', 20260529)])  
+    order_stream = stream_from_parquet(order_file, schema=order_schema, cols=order_columns, batch_size=batch_size, filters=(ds.field('TradingDay') == date))
+    deal_stream = stream_from_parquet(deal_file, schema=deal_schema, cols=deal_columns, batch_size=batch_size, filters=(ds.field('TradingDay') == date))
+    snapshot_stream = stream_from_parquet(snapshot_file, schema=snapshot_schema, cols=snapshot_columns, batch_size=batch_size, filters=(ds.field('TradingDay') == date))
     
     curr_order = next(order_stream, None)
     curr_deal = next(deal_stream, None)
@@ -621,7 +621,7 @@ def stream_from_parquet(file_path, schema=None, cols=None, batch_size=5000, filt
 
     for batch in dataset.to_batches(columns=cols, filter=filters, batch_size=batch_size):
         if active_schema is not None:
-            batch = batch.cast(active_schema)
+                batch = batch.cast(active_schema)
             
         # 1. 转换为 DataFrame
         batch_df = batch.to_pandas()
@@ -646,7 +646,7 @@ def stream_from_parquet(file_path, schema=None, cols=None, batch_size=5000, filt
             yield row
 
 
-def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000):
+def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000, date=20260101):
     """
     从磁盘流式读取并构建订单薄
     :param order_file: 逐笔委托 parquet 文件路径
@@ -660,24 +660,22 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
     # 初始化本地统计计数器（用于校验单Tick和累计的流式指标）
     local_tick_deal_num = 0
     local_tick_volume = 0
-    local_tick_turnover = 0.0
+    local_tick_turnover = 0
     
-    local_total_deal_num = 0
-    local_total_volume = 0
-    local_total_turnover = 0.0
+    local_total_dealnum = 0         #累计成交笔数
+    local_total_volume = 0          #累计成交量
+    local_total_turnover = 0        #累计成交额
+    local_total_weightbidprice = 0.0  #成交量加权平均委托买入价格（有效竞价范围内）
+    local_total_weightaskprice = 0.0  #成交量加权平均委托卖出入价格（有效竞价范围内）
+    local_total_bidvolume = 0       #委托买入总量（有效竞价范围内）
+    local_total_askvolume = 0       #委托卖出总量（有效竞价范围内）
 
+    target_decimals = None
     # 状态控制开关：正式的 9:25 快照基准是否已经激活
     formal_activated = False
     
-
-    # 用于自产orderbook与snapshot对照
-    accumulated_orders = []
-    accumulated_deals = []
-
-    snap_counter = 1        # 用于输出文件编号：snap1, snap2, ...
-    
     # 直接消费磁盘流，内存开销恒定
-    for event_type, row in stream_l2_timeline(order_file, deal_file, snapshot_file, batch_size):  
+    for event_type, row in stream_l2_timeline(order_file, deal_file, snapshot_file, batch_size, date=date):  
         # 提取当前事件的时间戳 (格式形如: 91501420)
         event_time = getattr(row, 'OrderTime', getattr(row, 'DealTime', getattr(row, 'TickTime', 0)))
 
@@ -698,8 +696,6 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
         # ==========================================
         if event_type == 'Order':
             #print(", ".join(f"{k}={v}" for k, v in row._asdict().items()))
-            # 将行数据脱掉 Pandas() 外壳，转为字典并存入累积桶
-            accumulated_orders.append(row._asdict())
             order_id = int(row.OrderID)
             
             if row.OrderType == 0:    # 委买
@@ -711,17 +707,24 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
             elif row.OrderType == -11:# 撤卖
                 ob.cancel_order(order_id)
                 
-            if row.OrderType in [1, 2, 3]:    # 市价/限价/本方最优 委买
+            if row.OrderType == 1: #市价 委买
+                ob.insert_order(order_id, row.LastPrice, row.Volume, 'B', row.OrderTime)                
+            elif row.OrderType == 2:    # 限价 委买
                 ob.insert_order(order_id, row.Price, row.Volume, 'B', row.OrderTime)
-            elif row.OrderType in [11, 12, 13]: # 市价/限价/本方最优 委卖
+            elif row.OrderType == 3: #本方最优 委买
+                ob.insert_order(order_id, ob.get_bbo_bid(), row.Volume, 'B', row.OrderTime)
+            elif row.OrderType == 11: # 市价/本方最优委卖
+                ob.insert_order(order_id, row.LastPrice, row.Volume, 'S', row.OrderTime)       
+            elif row.OrderType == 12: # 限价 委卖
                 ob.insert_order(order_id, row.Price, row.Volume, 'S', row.OrderTime)
+            elif row.OrderType == 13: # 市价/本方最优委卖
+                ob.insert_order(order_id, ob.get_bbo_ask(), row.Volume, 'S', row.OrderTime)
                     
         # ==========================================
         # 核心逻辑 B：处理逐笔成交与撤单 (Deal Stream)
         # ==========================================
         elif event_type == 'Deal':
             #print(", ".join(f"{k}={v}" for k, v in row._asdict().items()))
-            accumulated_deals.append(row._asdict())
             side = row.Side
             
             # 1. 正常成交 (0: 主动买入, 1: 主动卖出)
@@ -730,25 +733,25 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
                 ob.execute_trade(ref_id=int(row.BuyID), exec_qty=row.Volume)
                 ob.execute_trade(ref_id=int(row.SellID), exec_qty=row.Volume)
                 
+                # 增量累加本地的成交统计数据
+                if event_time >= 92500000:
+                    deal_turnover = row.Price * row.Volume
+                    
+                    local_tick_deal_num += 1
+                    local_tick_volume += row.Volume
+                    local_tick_turnover += deal_turnover
+                    
+                    local_total_dealnum += 1
+                    local_total_volume += row.Volume
+                    local_total_turnover += deal_turnover
+                
             # 2. 独立撤单记录 (深市全部在此处下发，部分清洗后的沪市亦同)
             elif side == -1:  # 买单撤单
-                #print(row)
                 ob.cancel_order(ref_id=int(row.BuyID))
             elif side == -11: # df
-                #print(row)
                 ob.cancel_order(ref_id=int(row.SellID))
 
-            # 增量累加本地的成交统计数据
-            if event_time >= 92500000:
-                deal_turnover = row.Price * row.Volume
-                
-                local_tick_deal_num += 1
-                local_tick_volume += row.Volume
-                local_tick_turnover += deal_turnover
-                
-                local_total_deal_num += 1
-                local_total_volume += row.Volume
-                local_total_turnover += deal_turnover
+            
 
         # ==========================================
         # 核心逻辑 C：快照比对与修正检测 (Snapshot Stream)
@@ -757,8 +760,11 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
             t_time = row.TickTime
 
             # 💡 9:15 ~ 9:25 属于数据准备阶段，快照静默跳过，不建立基准，也不做断言
-            if t_time < 92500000:
+            if t_time < 92500000 or (t_time>=145700000 and t_time<150000000):
                 continue
+
+            if target_decimals is None:
+                target_decimals = 0 if row.WeightBidPrice % 1 == 0 else 1
 
             # ========================================================
             # 💡 冷启动：首幅快照静默初始化 (Anchor Phase)
@@ -769,64 +775,43 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
             # ========================================================
             # 正常校验逻辑 (进入常态化运行，从第二幅快照开始生效)
             # ========================================================
-            # 写入本轮累积的 Order 数据
-            if accumulated_orders:
-                df_orders = pd.DataFrame(accumulated_orders)
-                order_filename = CONFIG.inferred_path['RESULT_PATH']/f'order_snap{snap_counter}.csv'
-                # utf-8-sig 专门防止 Excel 打开中文或大数字时产生乱码
-                df_orders.to_csv(order_filename, index=False, encoding='utf-8-sig')
-                print(f"   └─📄 已生成: {order_filename} (共 {len(accumulated_orders)} 条委托)")
-            else:
-                print(f"   └─ℹ️ 区间内无 Order 委托数据")
-
-            # 写入本轮累积的 Deal 数据
-            if accumulated_deals:
-                df_deals = pd.DataFrame(accumulated_deals)
-                deal_filename = CONFIG.inferred_path['RESULT_PATH']/f'deal_snap{snap_counter}.csv'
-                df_deals.to_csv(deal_filename, index=False, encoding='utf-8-sig')
-                print(f"   └─📄 已生成: {deal_filename} (共 {len(accumulated_deals)} 条成交/撤单)")
-            else:
-                print(f"   └─ℹ️ 区间内无 Deal 成交数据")
-
-            # --- 状态归零，准备迎接下一个 3 秒周期的累积 ---
-            accumulated_orders.clear()
-            accumulated_deals.clear()
-            
-            # 计数器递增
-            snap_counter += 1
+            my_tot_bid_vol, my_tot_ask_vol, my_w_bid_p, my_w_ask_p = ob.get_orderbook_stats()
+            if target_decimals != 0:
+                my_bid_aligned = round(my_w_bid_p, target_decimals)
+                my_ask_aligned = round(my_w_ask_p, target_decimals)
+                local_tick_turnover = round(local_tick_turnover/100)*100
 
             # ---------------- A. 检验并校准：当前 Tick 指标 ----------------
             if local_tick_deal_num != row.DealNum or local_tick_volume != row.Volume or local_tick_turnover != row.Turnover:
                 print(f"🚨 [{t_time}] 单Tick成交异常 | "
-                      f"本地合成(笔数:{local_tick_deal_num},量:{local_tick_volume},额:{local_tick_turnover:.2f}) vs "
-                      f"官方快照(笔数:{row.DealNum},量:{row.Volume},额:{row.Turnover:.2f})")
+                      f"本地Tick(笔数:{local_tick_deal_num},量:{local_tick_volume},额:{local_tick_turnover}) vs "
+                      f"官方Tick(笔数:{row.DealNum},量:{row.Volume},额:{row.Turnover})")
             
             # ---------------- B. 检验并校准：累计成交指标 ----------------
-            if local_total_deal_num != row.TotalDealNum or local_total_volume != row.TotalVolume or local_total_turnover != row.TotalTurnover:
+            if local_total_dealnum != row.TotalDealNum or local_total_volume != row.TotalVolume or local_total_turnover != row.TotalTurnover:
                 print(f"⚡ [{t_time}] 累计成交断层 | "
-                      f"本地累计(笔数:{local_total_deal_num},量:{local_total_volume},额:{local_total_turnover:.2f}) vs "
-                      f"官方快照(笔数:{row.TotalDealNum},量:{row.TotalVolume},额:{row.TotalTurnover:.2f}) -> 🛠️ 强行拉齐历史基准")
+                      f"本地累计(笔数:{local_total_dealnum},量:{local_total_volume},额:{local_total_turnover}) vs "
+                      f"官方累积(笔数:{row.TotalDealNum},量:{row.TotalVolume},额:{row.TotalTurnover})")
                 # ❗️【核心自愈】以官方快照数据为绝对真理，清洗本地累计计数器，防止误差雪崩
-                local_total_deal_num = int(row.TotalDealNum)
-                local_total_volume = int(row.TotalVolume)
-                local_total_turnover = float(row.TotalTurnover)
+                local_total_dealnum = row.TotalDealNum
+                local_total_volume = row.TotalVolume
+                local_total_turnover = row.TotalTurnover
             
             # 每一个 Snapshot 落地后，单 Tick 计数器必须清零，开始下一轮3秒的流式累加
             local_tick_deal_num = 0
             local_tick_volume = 0
-            local_tick_turnover = 0.0
+            local_tick_turnover = 0
 
             # ---------------- C. 检验：全盘委托总量及加权均价 ----------------
-            # 从本地账本拉取全盘挂单快照 (包含10档外的深层挂单)
-            my_tot_bid_vol, my_tot_ask_vol, my_w_bid_p, my_w_ask_p = ob.get_orderbook_stats()
-            
-            if my_tot_bid_vol != row.TotalBidVolume or not np.isclose(my_w_bid_p, row.WeightBidPrice, atol=0.001):
+            # 从本地账本拉取全盘挂单快照 (包含10档外的深层挂单)          
+
+            if my_tot_bid_vol != row.TotalBidVolume or not np.isclose(my_bid_aligned, row.WeightBidPrice, atol=0.01):
                 print(f"🔍 [{t_time}] 全盘买方总量不一致 | "
-                      f"自制总买量:{my_tot_bid_vol} (官方:{row.TotalBidVolume}) | 自制买均价:{my_w_bid_p:.4f} (官方:{row.WeightBidPrice:.4f})")
+                      f"自制总买量:{my_tot_bid_vol} (官方:{row.TotalBidVolume}) | 自制买均价:{my_bid_aligned:.1f} (官方:{row.WeightBidPrice:.1f})")
                       
-            if my_tot_ask_vol != row.TotalAskVolume or not np.isclose(my_w_ask_p, row.WeightAskPrice, atol=0.001):
+            if my_tot_ask_vol != row.TotalAskVolume or not np.isclose(my_ask_aligned, row.WeightAskPrice, atol=0.01):
                 print(f"🔍 [{t_time}] 全盘卖方总量不一致 | "
-                      f"自制总卖量:{my_tot_ask_vol} (官方:{row.TotalAskVolume}) | 自制卖均价:{my_w_ask_p:.4f} (官方:{row.WeightAskPrice:.4f})")
+                      f"自制总卖量:{my_tot_ask_vol} (官方:{row.TotalAskVolume}) | 自制卖均价:{my_ask_aligned:.1f} (官方:{row.WeightAskPrice:.1f})")
 
             # ---------------- D. 检验并校准：十档深度切片 ----------------
             snap_bids = [(getattr(row, f'BidPrice{i}'), int(getattr(row, f'BidVolume{i}')), int(getattr(row, f'BidOrder{i}'))) for i in range(1, 11) if getattr(row, f'BidPrice{i}') > 0]
@@ -848,7 +833,7 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
                     if p_snap not in my_dict or my_dict[p_snap] != (v_snap, c_snap):
                         v_my, c_my = my_dict.get(p_snap, (0, 0))
                         print(f"⚠️ [{t_time}] 十档档位不符 | 方向:{side} | 价格:{p_snap} | 自制(量:{v_my},单:{c_my}) vs 快照(量:{v_snap},单:{c_snap}) -> 🛠️ 强行覆写")
-                        #ob.calibrate_level(side, p_snap, v_snap, c_snap, t_time)
+                        ob.calibrate_level(side, p_snap, v_snap, c_snap, t_time)
 
                 # 幽灵残留档位抹除
                 for p_my, vol_my, count_my in my_levels:
@@ -858,7 +843,7 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
                         if side == 'S' and p_my > boundary_price: continue
                     if p_my not in snap_dict:
                         print(f"👻 [{t_time}] 幽灵档位清除 | 方向:{side} | 价格:{p_my} 属于残留脏数据 -> ❌ 强制抹除")
-                        #ob.calibrate_level(side, p_my, 0, 0, t_time)
+                        ob.calibrate_level(side, p_my, 0, 0, t_time)
                  
         # 💡 [量化切片提示]：可在时序推进时就地计算订单薄因子，无需保留历史行，即用即扔。
         # if row.OrderTime % 3000 == 0:
@@ -869,7 +854,7 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000)
 if __name__ == '__main__':
     #stock_df = get_allstock()
     stocklist = [2631, 688017, 688693]
-    tasks = [("20260601", "002631"), ("20260601", "688017"), ("20260601", "688693")]
+    tasks = [(20260529, "688017"), (20260529, "688693"), (20260529, "002631")]
     #process_type = ['snapshot', 'deal', 'order', 'order_raw', 'index']
     process_type = ['index']
     base_dir = CONFIG.base_path['LEVEL2_TEMP']
@@ -890,5 +875,5 @@ if __name__ == '__main__':
             results.append(task_result)
         
     # 将所有人最终提取出的日线特征聚合成一个紧凑的明细表，直接扔进你的基础日线回测系统
-    df_l2_features = pd.DataFrame([r for r in results if r is not None])
-    df_l2_features.to_parquet("E:/gitcode/AXOrderBook/data/daily_l2_features.parquet")
+    #df_l2_features = pd.DataFrame([r for r in results if r is not None])
+    #df_l2_features.to_parquet("E:/gitcode/AXOrderBook/data/daily_l2_features.parquet")

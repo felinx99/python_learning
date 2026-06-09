@@ -1,3 +1,5 @@
+from sortedcontainers import SortedDict
+
 class OrderNode:
     """订单节点：存储单个订单的明细，双向链表节点"""
     def __init__(self, ref_id, price, qty, side, timestamp):
@@ -53,14 +55,14 @@ class PriceLevelList:
 class OrderBook:
     """基于 Method 3 专门对接 L2 逐笔数据的订单薄状态机"""
     def __init__(self):
-        self.bids = {}          # 买盘盘口 {price: PriceLevelList}
-        self.asks = {}          # 卖盘盘口 {price: PriceLevelList}
-        self.ref_id_map = {}    # 全局 ID 哈希映射 {ref_id: OrderNode}
+        self.bids = SortedDict(lambda x: -x)    # 买盘盘口 {price: PriceLevelList}
+        self.asks = SortedDict()                # 卖盘盘口 {price: PriceLevelList}# 默认升序排列
+        self.ref_id_map = {}                    # 全局 ID 哈希映射 {ref_id: OrderNode}
 
     def insert_order(self, ref_id, price, qty, side, timestamp):
         """处理委托：插入新订单"""
         if ref_id in self.ref_id_map:
-            print("ref_id exists")
+            print(f"⚠️ [Insert Warning] ref_id {ref_id} exists")
             return  # 异常防重处理
         
         node = OrderNode(ref_id, price, qty, side, timestamp)
@@ -114,8 +116,10 @@ class OrderBook:
         """获取当前五档盘口"""
         assert side in ['S', 'B'], f"Error: side type '{side}' Not Support"
         book = self.bids if side == 'B' else self.asks
-        sorted_prices = sorted(book.keys(), reverse=(side == 'B'))[:n_levels]
-        # 返回格式：[(价格, 挂单量, 单数), ...]
+        #sorted_prices = sorted(book.keys(), reverse=(side == 'B'))[:n_levels]
+
+        sorted_prices = book.keys()[:n_levels]
+            
         return [(p, book[p].total_volume, book[p].order_count) for p in sorted_prices]
 
     def get_orderbook_stats(self):
@@ -128,25 +132,33 @@ class OrderBook:
         bid_sum_pv = sum(level.price * level.total_volume for level in self.bids.values())
         ask_sum_pv = sum(level.price * level.total_volume for level in self.asks.values())
         
-        weight_bid_price = round((bid_sum_pv / total_bid_vol) if total_bid_vol > 0 else 0.0)
-        weight_ask_price = round((ask_sum_pv / total_ask_vol) if total_ask_vol > 0 else 0.0)
-        
+        weight_bid_price = round((bid_sum_pv / total_bid_vol) if total_bid_vol > 0 else 0.0, 4)
+        weight_ask_price = round((ask_sum_pv / total_ask_vol) if total_ask_vol > 0 else 0.0, 4)
+
         return total_bid_vol, total_ask_vol, weight_bid_price, weight_ask_price
 
     def calibrate_level(self, side, price, true_vol, true_count, timestamp):
         book = self.bids if side == 'B' else self.asks
-        if price not in book:
-            book[price] = PriceLevelList(price)
-        
-        p_list = book[price]
-        curr = p_list.head
-        while curr:
-            if curr.ref_id in self.ref_id_map:
-                del self.ref_id_map[curr.ref_id]
-            curr = curr.next
-        p_list.clear()
+    
+        # 💡 核心优化 1：短路保护 SortedDict 频繁无效平衡
+        if price not in book and true_vol <= 0:
+            return
 
+        # 如果价位存在，才清理旧的 ref_id 映射
+        if price in book:
+            p_list = book[price]
+            curr = p_list.head
+            while curr:
+                if curr.ref_id in self.ref_id_map:
+                    del self.ref_id_map[curr.ref_id]
+                curr = curr.next
+            p_list.clear()
+        else:
+            book[price] = PriceLevelList(price)
+
+        # 💡 核心优化 2：按真实量决定剪枝还是保留
         if true_vol > 0:
+            p_list = book[price]
             syn_id = f"syn_{side}_{int(price)}_{timestamp}"
             syn_node = OrderNode(syn_id, price, true_vol, side, timestamp)
             self.ref_id_map[syn_id] = syn_node
@@ -156,3 +168,9 @@ class OrderBook:
             p_list.order_count = true_count
         else:
             del book[price]
+
+    def get_bbo_bid(self):
+        return self.bids.peekitem(0)[0] if self.bids else 0
+
+    def get_bbo_ask(self):        
+        return self.asks.peekitem(0)[0] if self.asks else 0
