@@ -45,6 +45,13 @@ class PriceLevelList:
         self.total_volume -= node.qty
         self.order_count -= 1
 
+    def reduce(self, node, cancel_qty):
+        """
+        O(1) 部分撤单（减仓）：仅减少订单数量。
+        """
+        node.qty -= cancel_qty
+        self.total_volume -= cancel_qty
+
     def clear(self):
         """清空当前价格档位的所有底层节点指针"""
         self.head = None
@@ -73,26 +80,31 @@ class OrderBook:
             book[price] = PriceLevelList(price)
         book[price].append(node)
 
-    def cancel_order(self, ref_id):
+    def cancel_order(self, ref_id, cancel_qty=None):
         """处理撤单：依靠哈希表实现平均 O(1) 精确销单"""
         if ref_id not in self.ref_id_map:
             return False  # 找不到说明之前可能已经完全成交了
         
         node = self.ref_id_map[ref_id]
-        book = self.bids if node.side == 'B' else self.asks
-        
+        book = self.bids if node.side == 'B' else self.asks    
         price_list = book[node.price]
-        price_list.remove(node)
-        
-        if price_list.order_count == 0:
-            del book[node.price]
-            
-        del self.ref_id_map[ref_id]
+
+        if cancel_qty is None or cancel_qty >= node.qty:
+            price_list.remove(node)
+
+            if price_list.order_count == 0:
+                del book[node.price]
+
+            del self.ref_id_map[ref_id]
+        else:
+            price_list.reduce(node, cancel_qty)
+
         return True
 
     def execute_trade(self, ref_id, exec_qty):
         """处理成交：根据成交明细里的明确 ID 扣减对应的挂单量"""
         if ref_id not in self.ref_id_map:
+            print(f"⚠️ execute_trade ref_id {ref_id} not exists")
             return False
         
         node = self.ref_id_map[ref_id]

@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor
 from common import CONFIG, DATAFRAME
 from .util.order import OrderNode, OrderBook
 
+TIMESHIFT = 1000
 def get_allstock():
     srcpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
 
@@ -547,9 +548,13 @@ def rebuild_order_book(df_all):
 def process_single_stock_day(date, stock_code):
     daily_feature_dict={}
 
-    order_file = CONFIG.base_path['A_LEVEL2']/f"202605/order/{stock_code}.parquet"
-    deal_file = CONFIG.base_path['A_LEVEL2']/f"202605/deal/{stock_code}.parquet"
-    snapshot_file = CONFIG.base_path['A_LEVEL2']/f"202605/snapshot/{stock_code}.parquet"
+    #order_file = CONFIG.base_path['A_LEVEL2']/f"202605/order/{stock_code}.parquet"
+    #deal_file = CONFIG.base_path['A_LEVEL2']/f"202605/deal/{stock_code}.parquet"
+    #snapshot_file = CONFIG.base_path['A_LEVEL2']/f"202605/snapshot/{stock_code}.parquet"
+
+    order_file = CONFIG.base_path['A_LEVEL2']/f"order/2026/202605/{stock_code}.parquet"
+    deal_file = CONFIG.base_path['A_LEVEL2']/f"deal/2026/202605/{stock_code}.parquet"
+    snapshot_file = CONFIG.base_path['A_LEVEL2']/f"snapshot/2026/202605/{stock_code}.parquet"
     
     if not (os.path.exists(order_file) and os.path.exists(deal_file) and os.path.exists(snapshot_file)):
         return None
@@ -636,6 +641,9 @@ def stream_from_parquet(file_path, schema=None, cols=None, batch_size=5000, filt
 
         if 'CumTurnover' in batch_df.columns:
             batch_df['CumTurnover'] = (batch_df['CumTurnover'] * 100).round().astype('int64')
+
+        if 'TickTime' in batch_df.columns:
+            batch_df['TickTime'] = batch_df['TickTime'] - TIMESHIFT
             
         # 如果你的 local_tick_volume 也是放大 100 倍的，也可以在这里把 Volume 统一：
         # if 'Volume' in batch_df.columns:
@@ -645,6 +653,47 @@ def stream_from_parquet(file_path, schema=None, cols=None, batch_size=5000, filt
         for row in batch_df.itertuples(index=False):
             yield row
 
+def dump_topN_nodes(ob, side='B', n_levels=10):
+    """
+    直观打印 TopN 档位及底层双向链表节点状态，用于排查账本不一致 Bug
+    """
+    book = ob.bids if side == 'B' else ob.asks
+    # Bids 从大到小排，Asks 从小到大排
+    reverse_sort = True if side == 'B' else False
+    sorted_prices = sorted(book.keys(), reverse=reverse_sort)[:n_levels]
+    
+    side_str = "🟢 BIDS (买盘)" if side == 'B' else "🔴 ASKS (卖盘)"
+    
+    print(f"\n{'='*40} {side_str} TOP {n_levels} 链表深度剖析 {'='*40}")
+    print(f"{'档位':<4} | {'价格 (Price)':<12} | {'总挂单量':<10} | {'单数':<5} |  双向链表完整节点视图 (Head -> Tail)")
+    print("-" * 110)
+    
+    for i, price in enumerate(sorted_prices, 1):
+        price_list = book[price]
+        
+        # 1. 顺着链表 head -> next 一路向后遍历
+        node_chain = []
+        curr = price_list.head
+        
+        # 防死循环安全计数（防止双向链表成环）
+        loop_guard = 0 
+        while curr:
+            # 格式化单个节点信息：[订单ID | 数量]
+            node_chain.append(f"🔗 [ID:{curr.ref_id}|Qty:{curr.qty}]")
+            curr = curr.next
+            
+            loop_guard += 1
+            if loop_guard > 1000: # 异常防死锁
+                node_chain.append("... 🚨 检测到链表成环死循环! 🚨")
+                break
+                
+        # 2. 拼装成直观的箭头链路
+        chain_visual = " ➔ ".join(node_chain) if node_chain else "Ø (空链表)"
+        
+        # 3. 打印当前档位聚合数据与链路
+        print(f"L{i:<3} | {price:<12.2f} | {price_list.total_volume:<10} | {price_list.order_count:<5} | {chain_visual}")
+        
+    print(f"{'='*102}\n")
 
 def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000, date=20260101):
     """
@@ -665,49 +714,130 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000,
     local_total_dealnum = 0         #累计成交笔数
     local_total_volume = 0          #累计成交量
     local_total_turnover = 0        #累计成交额
-    local_total_weightbidprice = 0.0  #成交量加权平均委托买入价格（有效竞价范围内）
-    local_total_weightaskprice = 0.0  #成交量加权平均委托卖出入价格（有效竞价范围内）
-    local_total_bidvolume = 0       #委托买入总量（有效竞价范围内）
-    local_total_askvolume = 0       #委托卖出总量（有效竞价范围内）
 
     target_decimals = None
-    # 状态控制开关：正式的 9:25 快照基准是否已经激活
-    formal_activated = False
+
+    latest_snapshot = None          # 缓存最新的官方快照行数据
+    latest_snapshto_ticktime = 0
+    latest_snapshto_ticktime_up = 0
+    snapshot_verified = True
+    weightprice_notmatch = False
+
+    # 缓存快照的十档字典结构
+    cached_snap_bids, cached_snap_asks = [], []
+    cached_snap_bid_dict, cached_snap_ask_dict = {}, {}
     
     # 直接消费磁盘流，内存开销恒定
     for event_type, row in stream_l2_timeline(order_file, deal_file, snapshot_file, batch_size, date=date):  
         # 提取当前事件的时间戳 (格式形如: 91501420)
         event_time = getattr(row, 'OrderTime', getattr(row, 'DealTime', getattr(row, 'TickTime', 0)))
 
-        # ========================================================
-        # 💡 冷启动：快照前置断言检测（异常状态拦截，首个数据一定是初始化快照数据）
-        # ========================================================
-        if event_type in ['Order', 'Deal']:
-            # 如果首幅快照还没到，就已经推进了 Order 或 Deal，直接触发断言崩溃
-            if event_time > 92500000 and not formal_activated:
-                assert False, (
-                    f"🚨 [数据异常断言触发] 逐笔数据流时间 ({event_time}) 已进入连续交易预备期，"
-                    f"但 9:25:00 的开盘首幅正式快照尚未到达或未完成基准激活！"
-                )
 
+        if event_type in ['Order', 'Deal']:
+            if not snapshot_verified:
+                if (event_time // 1000) == ((latest_snapshto_ticktime+TIMESHIFT) // 1000):
+                    my_tot_bid_vol, my_tot_ask_vol, my_w_bid_p, my_w_ask_p = ob.get_orderbook_stats()
+
+                    my_w_bid_p = round(my_w_bid_p) if target_decimals == 0 else round(my_w_bid_p, target_decimals)
+                    my_w_ask_p = round(my_w_ask_p) if target_decimals == 0 else round(my_w_ask_p, target_decimals)
+
+                    if my_tot_bid_vol == latest_snapshot.TotalBidVolume and my_tot_ask_vol == latest_snapshot.TotalAskVolume and local_total_dealnum == latest_snapshot.TotalDealNum:
+                        my_bids = ob.get_topN_snapshot('B', n_levels=10)
+                        my_asks = ob.get_topN_snapshot('S', n_levels=10)
+                        my_bid_dict = {p: (v, c) for p, v, c in my_bids}
+                        my_ask_dict = {p: (v, c) for p, v, c in my_asks}
+                    
+                        match_levels = (my_bid_dict == cached_snap_bid_dict) and (my_ask_dict == cached_snap_ask_dict)
+
+                        # 🎯 黄金匹配点触发：四维断言全部通过！说明本地成功锁定了快照在这一秒内的微秒级生成瞬间
+                        if match_levels:
+                            # ---------------- C. 检验：全盘委托总量及加权均价 ----------------
+                            # 从本地账本拉取全盘挂单快照 (包含10档外的深层挂单)          
+                            if abs(my_w_bid_p - latest_snapshot.WeightBidPrice) > 0.2 or abs(my_w_ask_p - latest_snapshot.WeightAskPrice) > 0.2:
+                                weightprice_notmatch = True
+                            else:
+                                if weightprice_notmatch:
+                                    print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 超时全盘卖方/买方不一致已恢复")
+                                    weightprice_notmatch = False
+                                snapshot_verified = True
+                                # 每一个 Snapshot 落地后，单 Tick 计数器必须清零，开始下一轮3秒的流式累加
+                                local_tick_deal_num = 0
+                                local_tick_volume = 0
+                                local_tick_turnover = 0
+                                #print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] snapshot秒内无挂单Order, 无成交Deal")
+
+
+                if event_time > latest_snapshto_ticktime_up:
+                    my_tot_bid_vol, my_tot_ask_vol, my_w_bid_p, my_w_ask_p = ob.get_orderbook_stats()
+
+                    my_w_bid_p = round(my_w_bid_p) if target_decimals == 0 else round(my_w_bid_p, target_decimals)
+                    my_w_ask_p = round(my_w_ask_p) if target_decimals == 0 else round(my_w_ask_p, target_decimals)
+
+                    if my_tot_bid_vol == latest_snapshot.TotalBidVolume and my_tot_ask_vol == latest_snapshot.TotalAskVolume and local_total_dealnum == latest_snapshot.TotalDealNum:
+                        my_bids = ob.get_topN_snapshot('B', n_levels=10)
+                        my_asks = ob.get_topN_snapshot('S', n_levels=10)
+                        my_bid_dict = {p: (v, c) for p, v, c in my_bids}
+                        my_ask_dict = {p: (v, c) for p, v, c in my_asks}
+                    
+                        match_levels = (my_bid_dict == cached_snap_bid_dict) and (my_ask_dict == cached_snap_ask_dict)
+
+                        # 🎯 黄金匹配点触发：四维断言全部通过！说明本地成功锁定了快照在这一秒内的微秒级生成瞬间
+                        if match_levels:
+                            # ---------------- C. 检验：全盘委托总量及加权均价 ----------------
+                            # 从本地账本拉取全盘挂单快照 (包含10档外的深层挂单)          
+                            if abs(my_w_bid_p - latest_snapshot.WeightBidPrice) > 0.2 or abs(my_w_ask_p - latest_snapshot.WeightAskPrice) > 0.2:
+                                print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 超时snapshot无法匹配，累积卖单/买单加权价不匹配")
+                                weightprice_notmatch = True
+                            else:
+                                if weightprice_notmatch:
+                                    print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 超时全盘卖方/买方不一致已恢复")
+                                    weightprice_notmatch = False
+                                snapshot_verified = True
+                                # 每一个 Snapshot 落地后，单 Tick 计数器必须清零，开始下一轮3秒的流式累加
+                                local_tick_deal_num = 0
+                                local_tick_volume = 0
+                                local_tick_turnover = 0
+                                #print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] snapshot秒内无挂单Order, 无成交Deal")
+                        else:
+                            snapshot_verified = True
+                            print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 超时snapshot无法匹配，十档不匹配")
+                            #dump_topN_nodes(ob, side='B', n_levels=10)
+                    else:
+                        snapshot_verified = True
+                        if local_total_dealnum != latest_snapshot.TotalDealNum or local_total_volume != latest_snapshot.TotalVolume or local_total_turnover != latest_snapshot.TotalTurnover:
+                            print(f"⚡ [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 超时累计成交断层 | "
+                                f"本地累计(笔数:{local_total_dealnum},量:{local_total_volume},额:{local_total_turnover}) vs "
+                                f"官方累积(笔数:{latest_snapshot.TotalDealNum},量:{latest_snapshot.TotalVolume},额:{latest_snapshot.TotalTurnover})")
+                        if local_tick_volume != latest_snapshot.Volume or abs(local_tick_turnover-latest_snapshot.Turnover)>50:
+                            print(f"🚨 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 超时单Tick成交异常 | "
+                                f"本地Tick(笔数:{local_tick_deal_num},量:{local_tick_volume},额:{local_tick_turnover}) vs "
+                                f"官方Tick(笔数:{latest_snapshot.DealNum},量:{latest_snapshot.Volume},额:{latest_snapshot.Turnover})")
+                        if abs(my_w_bid_p - latest_snapshot.WeightBidPrice) > 0.2:
+                            print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 超时全盘买方不一致 | "
+                                f"自制总买量:{my_tot_bid_vol} (官方:{latest_snapshot.TotalBidVolume}) | 自制买均价:{my_w_bid_p:.1f} (官方:{latest_snapshot.WeightBidPrice:.1f})")
+                                
+                        if abs(my_w_ask_p - latest_snapshot.WeightAskPrice) > 0.2:
+                            print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 超时全盘卖方不一致 | "
+                                f"自制总卖量:{my_tot_ask_vol} (官方:{latest_snapshot.TotalAskVolume}) | 自制卖均价:{my_w_ask_p:.1f} (官方:{latest_snapshot.WeightAskPrice:.1f})")
 
         # ==========================================
         # 核心逻辑 A：处理逐笔委托 (Order Stream)
         # ==========================================
         if event_type == 'Order':
             #print(", ".join(f"{k}={v}" for k, v in row._asdict().items()))
+            #print(f"OrderTime:f{event_time}")
             order_id = int(row.OrderID)
-            
+
             if row.OrderType == 0:    # 委买
                 ob.insert_order(order_id, row.Price, row.Volume, 'B', row.OrderTime)
             elif row.OrderType == 10: # 委卖
                 ob.insert_order(order_id, row.Price, row.Volume, 'S', row.OrderTime)
             elif row.OrderType == -1: # 撤买 (沪市特有：委托表直接下发撤单记录)
-                ob.cancel_order(order_id)
+                ob.cancel_order(order_id, row.Volume)
             elif row.OrderType == -11:# 撤卖
-                ob.cancel_order(order_id)
+                ob.cancel_order(order_id, row.Volume)
                 
-            if row.OrderType == 1: #市价 委买
+            elif row.OrderType == 1: #市价 委买
                 ob.insert_order(order_id, row.LastPrice, row.Volume, 'B', row.OrderTime)                
             elif row.OrderType == 2:    # 限价 委买
                 ob.insert_order(order_id, row.Price, row.Volume, 'B', row.OrderTime)
@@ -719,19 +849,20 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000,
                 ob.insert_order(order_id, row.Price, row.Volume, 'S', row.OrderTime)
             elif row.OrderType == 13: # 市价/本方最优委卖
                 ob.insert_order(order_id, ob.get_bbo_ask(), row.Volume, 'S', row.OrderTime)
-                    
+       
         # ==========================================
         # 核心逻辑 B：处理逐笔成交与撤单 (Deal Stream)
         # ==========================================
         elif event_type == 'Deal':
             #print(", ".join(f"{k}={v}" for k, v in row._asdict().items()))
+            #print(f"DealTime:{event_time}")
             side = row.Side
             
             # 1. 正常成交 (0: 主动买入, 1: 主动卖出)
             if side in [0, 1]:
                 # 交易所 L2 机制：一笔成交双边扣减
-                ob.execute_trade(ref_id=int(row.BuyID), exec_qty=row.Volume)
-                ob.execute_trade(ref_id=int(row.SellID), exec_qty=row.Volume)
+                ob.execute_trade(ref_id=row.BuyID, exec_qty=row.Volume)
+                ob.execute_trade(ref_id=row.SellID, exec_qty=row.Volume)
                 
                 # 增量累加本地的成交统计数据
                 if event_time >= 92500000:
@@ -747,104 +878,72 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000,
                 
             # 2. 独立撤单记录 (深市全部在此处下发，部分清洗后的沪市亦同)
             elif side == -1:  # 买单撤单
-                ob.cancel_order(ref_id=int(row.BuyID))
+                ob.cancel_order(ref_id=row.BuyID, cancel_qty=row.Volume)
             elif side == -11: # df
-                ob.cancel_order(ref_id=int(row.SellID))
-
-            
+                ob.cancel_order(ref_id=row.SellID, cancel_qty=row.Volume)
 
         # ==========================================
         # 核心逻辑 C：快照比对与修正检测 (Snapshot Stream)
         # ==========================================
         elif event_type == 'Snapshot':
-            t_time = row.TickTime
-
+            latest_snapshto_ticktime = row.TickTime
             # 💡 9:15 ~ 9:25 属于数据准备阶段，快照静默跳过，不建立基准，也不做断言
-            if t_time < 92500000 or (t_time>=145700000 and t_time<150000000):
+            if latest_snapshto_ticktime < 92500000-TIMESHIFT or (latest_snapshto_ticktime>=145700000 - TIMESHIFT and latest_snapshto_ticktime<150000000 - TIMESHIFT):
+                latest_snapshot = None
+                latest_snapshto_ticktime_up = 0
+                snapshot_verified = True
                 continue
+
+            #print(f"snapshot:{row.TickTime+TIMESHIFT}")
 
             if target_decimals is None:
                 target_decimals = 0 if row.WeightBidPrice % 1 == 0 else 1
-
-            # ========================================================
-            # 💡 冷启动：首幅快照静默初始化 (Anchor Phase)
-            # ========================================================
-            if not formal_activated:
-                formal_activated = True
-                print(f"🎯 [{t_time}] 成功捕获开盘正式快照！集合竞价逐笔已累积，正在启动首期对撞检验...")
-            # ========================================================
-            # 正常校验逻辑 (进入常态化运行，从第二幅快照开始生效)
-            # ========================================================
-            my_tot_bid_vol, my_tot_ask_vol, my_w_bid_p, my_w_ask_p = ob.get_orderbook_stats()
-            if target_decimals != 0:
-                my_bid_aligned = round(my_w_bid_p, target_decimals)
-                my_ask_aligned = round(my_w_ask_p, target_decimals)
-                local_tick_turnover = round(local_tick_turnover/100)*100
-
-            # ---------------- A. 检验并校准：当前 Tick 指标 ----------------
-            if local_tick_deal_num != row.DealNum or local_tick_volume != row.Volume or local_tick_turnover != row.Turnover:
-                print(f"🚨 [{t_time}] 单Tick成交异常 | "
-                      f"本地Tick(笔数:{local_tick_deal_num},量:{local_tick_volume},额:{local_tick_turnover}) vs "
-                      f"官方Tick(笔数:{row.DealNum},量:{row.Volume},额:{row.Turnover})")
             
-            # ---------------- B. 检验并校准：累计成交指标 ----------------
-            if local_total_dealnum != row.TotalDealNum or local_total_volume != row.TotalVolume or local_total_turnover != row.TotalTurnover:
-                print(f"⚡ [{t_time}] 累计成交断层 | "
-                      f"本地累计(笔数:{local_total_dealnum},量:{local_total_volume},额:{local_total_turnover}) vs "
-                      f"官方累积(笔数:{row.TotalDealNum},量:{row.TotalVolume},额:{row.TotalTurnover})")
-                # ❗️【核心自愈】以官方快照数据为绝对真理，清洗本地累计计数器，防止误差雪崩
-                local_total_dealnum = row.TotalDealNum
-                local_total_volume = row.TotalVolume
-                local_total_turnover = row.TotalTurnover
-            
-            # 每一个 Snapshot 落地后，单 Tick 计数器必须清零，开始下一轮3秒的流式累加
-            local_tick_deal_num = 0
-            local_tick_volume = 0
-            local_tick_turnover = 0
+            latest_snapshot = row
+            latest_snapshto_ticktime_up = latest_snapshto_ticktime + 999 + TIMESHIFT #不能取1000，截止时间为999毫秒，否则超时会计算下一秒的数据。取999时超时判断对应>=，取998时对应>。
+            snapshot_verified = False
 
-            # ---------------- C. 检验：全盘委托总量及加权均价 ----------------
-            # 从本地账本拉取全盘挂单快照 (包含10档外的深层挂单)          
+            weightprice_notmatch = False
 
-            if my_tot_bid_vol != row.TotalBidVolume or not np.isclose(my_bid_aligned, row.WeightBidPrice, atol=0.01):
-                print(f"🔍 [{t_time}] 全盘买方总量不一致 | "
-                      f"自制总买量:{my_tot_bid_vol} (官方:{row.TotalBidVolume}) | 自制买均价:{my_bid_aligned:.1f} (官方:{row.WeightBidPrice:.1f})")
-                      
-            if my_tot_ask_vol != row.TotalAskVolume or not np.isclose(my_ask_aligned, row.WeightAskPrice, atol=0.01):
-                print(f"🔍 [{t_time}] 全盘卖方总量不一致 | "
-                      f"自制总卖量:{my_tot_ask_vol} (官方:{row.TotalAskVolume}) | 自制卖均价:{my_ask_aligned:.1f} (官方:{row.WeightAskPrice:.1f})")
+            # 性能优化：在 O(1) 阶段提前解析好快照的十档字典，杜绝在逐笔高频循环中重复调用 getattr
+            cached_snap_bids = [(getattr(row, f'BidPrice{i}'), int(getattr(row, f'BidVolume{i}')), int(getattr(row, f'BidOrder{i}'))) for i in range(1, 11) if getattr(row, f'BidPrice{i}') > 0]
+            cached_snap_asks = [(getattr(row, f'AskPrice{i}'), int(getattr(row, f'AskVolume{i}')), int(getattr(row, f'AskOrder{i}'))) for i in range(1, 11) if getattr(row, f'AskPrice{i}') > 0]
+            cached_snap_bid_dict = {p: (v, c) for p, v, c in cached_snap_bids}
+            cached_snap_ask_dict = {p: (v, c) for p, v, c in cached_snap_asks}
 
-            # ---------------- D. 检验并校准：十档深度切片 ----------------
-            snap_bids = [(getattr(row, f'BidPrice{i}'), int(getattr(row, f'BidVolume{i}')), int(getattr(row, f'BidOrder{i}'))) for i in range(1, 11) if getattr(row, f'BidPrice{i}') > 0]
-            snap_asks = [(getattr(row, f'AskPrice{i}'), int(getattr(row, f'AskVolume{i}')), int(getattr(row, f'AskOrder{i}'))) for i in range(1, 11) if getattr(row, f'AskPrice{i}') > 0]
-            
-            # 提取自制订单薄前 10 档结构
-            my_bids = ob.get_topN_snapshot('B', n_levels=10)
-            my_asks = ob.get_topN_snapshot('S', n_levels=10)
+        if event_type in ['Order', 'Deal']:
+            if not snapshot_verified:
+                my_tot_bid_vol, my_tot_ask_vol, my_w_bid_p, my_w_ask_p = ob.get_orderbook_stats()
 
-            # 校验买盘与卖盘
-            for side, my_levels, snap_levels in [('B', my_bids, snap_bids), ('S', my_asks, snap_asks)]:
+
+                my_w_bid_p = round(my_w_bid_p) if target_decimals == 0 else round(my_w_bid_p, target_decimals)
+                my_w_ask_p = round(my_w_ask_p) if target_decimals == 0 else round(my_w_ask_p, target_decimals)
+
+                if my_tot_bid_vol == latest_snapshot.TotalBidVolume and my_tot_ask_vol == latest_snapshot.TotalAskVolume and local_total_dealnum == latest_snapshot.TotalDealNum:
+                    my_bids = ob.get_topN_snapshot('B', n_levels=10)
+                    my_asks = ob.get_topN_snapshot('S', n_levels=10)
+                    my_bid_dict = {p: (v, c) for p, v, c in my_bids}
+                    my_ask_dict = {p: (v, c) for p, v, c in my_asks}
                 
-                # 转为字典形式方便交叉对比 {price: (vol, count)}
-                my_dict = {p: (v, c) for p, v, c in my_levels}
-                snap_dict = {p: (v, c) for p, v, c in snap_levels}
-                
-                # 十档不一致：执行强行覆盖
-                for p_snap, (v_snap, c_snap) in snap_dict.items():
-                    if p_snap not in my_dict or my_dict[p_snap] != (v_snap, c_snap):
-                        v_my, c_my = my_dict.get(p_snap, (0, 0))
-                        print(f"⚠️ [{t_time}] 十档档位不符 | 方向:{side} | 价格:{p_snap} | 自制(量:{v_my},单:{c_my}) vs 快照(量:{v_snap},单:{c_snap}) -> 🛠️ 强行覆写")
-                        ob.calibrate_level(side, p_snap, v_snap, c_snap, t_time)
+                    match_levels = (my_bid_dict == cached_snap_bid_dict) and (my_ask_dict == cached_snap_ask_dict)
 
-                # 幽灵残留档位抹除
-                for p_my, vol_my, count_my in my_levels:
-                    if len(snap_levels) == 10:
-                        boundary_price = snap_levels[-1][0]
-                        if side == 'B' and p_my < boundary_price: continue
-                        if side == 'S' and p_my > boundary_price: continue
-                    if p_my not in snap_dict:
-                        print(f"👻 [{t_time}] 幽灵档位清除 | 方向:{side} | 价格:{p_my} 属于残留脏数据 -> ❌ 强制抹除")
-                        ob.calibrate_level(side, p_my, 0, 0, t_time)
-                 
+                    # 🎯 黄金匹配点触发：四维断言全部通过！说明本地成功锁定了快照在这一秒内的微秒级生成瞬间
+                    if match_levels:
+                        # ---------------- C. 检验：全盘委托总量及加权均价 ----------------
+                        # 从本地账本拉取全盘挂单快照 (包含10档外的深层挂单)          
+                        if abs(my_w_bid_p - latest_snapshot.WeightBidPrice) > 0.2 or abs(my_w_ask_p - latest_snapshot.WeightAskPrice) > 0.2:
+                            weightprice_notmatch = True
+                        else:
+                            if weightprice_notmatch:
+                                print(f"🔍 [{event_time}|{event_type}:{latest_snapshto_ticktime+TIMESHIFT}] 全盘卖方/买方不一致已恢复")
+                                weightprice_notmatch = False
+                            snapshot_verified = True
+                            # 每一个 Snapshot 落地后，单 Tick 计数器必须清零，开始下一轮3秒的流式累加
+                            local_tick_deal_num = 0
+                            local_tick_volume = 0
+                            local_tick_turnover = 0
+                        pass
+
         # 💡 [量化切片提示]：可在时序推进时就地计算订单薄因子，无需保留历史行，即用即扔。
         # if row.OrderTime % 3000 == 0:
         #     features = ob.get_snapshot(5)
@@ -853,8 +952,8 @@ def playback_and_rebuild(order_file, deal_file, snapshot_file, batch_size=50000,
 
 if __name__ == '__main__':
     #stock_df = get_allstock()
-    stocklist = [2631, 688017, 688693]
-    tasks = [(20260529, "688017"), (20260529, "688693"), (20260529, "002631")]
+    stocklist = [2631, 688017, 688693] #(20260529, "002631"), (20260529, "688017"), (20260529, "688693"), 
+    tasks = [(20260529, "003031"), (20260529, "000531"), (20260529, "002008"), (20260529, "600641"), (20260529, "601101"), (20260529, "603032"), (20260529, "605186"), (20260529, "688545"), (20260529, "300776"), (20260529, "301458")]
     #process_type = ['snapshot', 'deal', 'order', 'order_raw', 'index']
     process_type = ['index']
     base_dir = CONFIG.base_path['LEVEL2_TEMP']
