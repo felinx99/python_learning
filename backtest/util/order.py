@@ -1,4 +1,18 @@
 from sortedcontainers import SortedDict
+from dataclasses import dataclass
+
+
+@dataclass
+class DealStatus:
+   """Class for keeping track of an item in inventory."""
+   deal_count: int = 0
+   deal_volume: int = 0
+   deal_turnover: int = 0
+
+   def update(self, volume=0, price=0):
+       self.deal_count += 1
+       self.deal_volume += volume
+       self.deal_turnover += volume*price
 
 class OrderNode:
     """订单节点：存储单个订单的明细，双向链表节点"""
@@ -17,8 +31,8 @@ class PriceLevelList:
         self.price = price
         self.head = None
         self.tail = None
-        self.total_volume = 0       # 该档位总挂单量
-        self.order_count = 0        # 该档位总订单数
+        self.total_volume = 0       # 该档位总挂单量,通过接口维护，不可直接操作
+        self.order_count = 0        # 该档位总订单数,通过接口维护，不可直接操作
 
     def append(self, node):
         """O(1) 尾部插入新订单"""
@@ -65,13 +79,14 @@ class OrderBook:
         self.bids = SortedDict(lambda x: -x)    # 买盘盘口 {price: PriceLevelList}
         self.asks = SortedDict()                # 卖盘盘口 {price: PriceLevelList}# 默认升序排列
         self.ref_id_map = {}                    # 全局 ID 哈希映射 {ref_id: OrderNode}
+        self.deals = SortedDict() 
 
     def insert_order(self, ref_id, price, qty, side, timestamp):
         """处理委托：插入新订单"""
         if ref_id in self.ref_id_map:
             print(f"⚠️ [Insert Warning] ref_id {ref_id} exists")
             return  # 异常防重处理
-        
+
         node = OrderNode(ref_id, price, qty, side, timestamp)
         self.ref_id_map[ref_id] = node
         
@@ -101,7 +116,7 @@ class OrderBook:
 
         return True
 
-    def execute_trade(self, ref_id, exec_qty):
+    def execute_trade(self, ref_id, exec_qty, exec_price):
         """处理成交：根据成交明细里的明确 ID 扣减对应的挂单量"""
         if ref_id not in self.ref_id_map:
             print(f"⚠️ execute_trade ref_id {ref_id} not exists")
@@ -110,7 +125,15 @@ class OrderBook:
         node = self.ref_id_map[ref_id]
         book = self.bids if node.side == 'B' else self.asks
         price_list = book[node.price]
-        
+
+        #必须在订单薄操作前执行dealbook,有可能node.price不存在
+        #不可用node.price计算成交额，因竞价阶段执行价格与node.price不一致
+        if node.side == 'B':
+            dealbook = self.deals
+            if exec_price not in dealbook:
+                dealbook[exec_price] = DealStatus()
+            dealbook[exec_price].update(exec_qty, exec_price)
+
         if exec_qty >= node.qty:
             # 挂单被完全吃掉，直接从链表和哈希表中移除
             price_list.remove(node)
@@ -119,8 +142,7 @@ class OrderBook:
             del self.ref_id_map[ref_id]
         else:
             # 部分成交，原地减少挂单剩余数量
-            node.qty -= exec_qty
-            price_list.total_volume -= exec_qty
+            price_list.reduce(node, exec_qty)
             
         return True
 
@@ -148,6 +170,13 @@ class OrderBook:
         weight_ask_price = round((ask_sum_pv / total_ask_vol) if total_ask_vol > 0 else 0.0, 4)
 
         return total_bid_vol, total_ask_vol, weight_bid_price, weight_ask_price
+
+    def get_deal_status(self):
+        total_dealnum = sum(level.deal_count for level in self.deals.values())
+        total_dealvolume = sum(level.deal_volume for level in self.deals.values())
+        total_dealturnover = sum(level.deal_turnover for level in self.deals.values())
+
+        return total_dealnum, total_dealvolume, total_dealturnover
 
     def calibrate_level(self, side, price, true_vol, true_count, timestamp):
         book = self.bids if side == 'B' else self.asks

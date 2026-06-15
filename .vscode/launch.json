@@ -163,7 +163,7 @@
             "type": "debugpy",
             "console": "integratedTerminal",
             "request": "launch",
-            "module": "backtest.trendup_model",
+            "module": "backtest.st_level2_analysis",
             "cwd": "${workspaceFolder}",
             "justMyCode": false
         },
