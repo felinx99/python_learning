@@ -134,6 +134,9 @@ class OrderBook:
                 dealbook[exec_price] = DealStatus()
             dealbook[exec_price].update(exec_qty, exec_price)
 
+        if exec_qty > node.qty:
+            print(f"⚠️ execute_trade ref_id {ref_id} qty not match. exec_qty:{exec_qty} node.qty:{node.qty}")
+        
         if exec_qty >= node.qty:
             # 挂单被完全吃掉，直接从链表和哈希表中移除
             price_list.remove(node)

@@ -1,4 +1,5 @@
 import os
+import datetime
 import pyarrow as pa
 import pandas as pd
 import numpy as np
@@ -11,6 +12,146 @@ from common import CONFIG, DATAFRAME
 from .util.order import OrderNode, OrderBook
 
 TIMESHIFT = 1000
+
+
+def check_data_integrity(order_file=None, deal_file=None, snapshot_file=None, date=None, stock_code=None):
+   # 配置文件、对应时间列名、以及新增的【文件类型】标签
+    tasks = [
+        (order_file, 'OrderTime', 'order'),
+        (deal_file, 'DealTime', 'deal'),
+        (snapshot_file, 'TickTime', 'snapshot')
+    ]
+    
+    # 用于收集当前股票该交易日生成的 3 条记录
+    rows_to_append = []
+    
+    for file_path, time_col, file_type in tasks:
+        has_missing = False
+        missing_desc = "无"
+        
+
+        # 2. 检查时间边界
+        has_missing, missing_desc = check_file_time_boundary(file_path, time_col, date)
+
+                    
+        # 3. 构建单行标准字典
+        if has_missing:
+            print(f"stock:{stock_code} date:{stock_code} lack data")
+            rows_to_append.append({
+                'stockcode': stock_code,
+                'date': str(date),
+                '文件类型': file_type,  # 🎯 新增的目标列
+                '数据缺失(yes/no)': "是",
+                '缺失时间段': missing_desc
+            })
+        
+    # 4. 转化为 DataFrame 并追加写入 CSV
+    result_df = pd.DataFrame(rows_to_append)    
+    return result_df
+
+def check_deal(deal_file, stock_code=None):
+    """
+    将逐笔成交 Parquet 文件转换为 CSV 格式，每 10000 行切分一个文件，从 100 开始编号。
+    """
+    pb_path = CONFIG.base_path['LEVEL2_TEMP']
+    # 🎯 规避冲突的生产设计：为每只股票建立独立的子目录
+    output_dir = pb_path / f"{stock_code}.csv"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+
+    # 2. 读取全量 Parquet 数据
+    df = pd.read_parquet(deal_file)
+    total_rows = len(df)
+ 
+    # 3. 设置分块参数
+    chunk_size = 100000
+    file_idx = 100  # 🎯 从 100 开始编号
+    
+    # 4. 利用 iloc 游标进行高效率切片
+    for start_pos in range(0, total_rows, chunk_size):
+        # 切取 10000 行的数据块
+        chunk_df = df.iloc[start_pos : start_pos + chunk_size]
+        
+        # 构造最终输出路径，例如：LEVEL2_TEMP/000001/100.csv
+        csv_file_path = output_dir / f"{file_idx}.csv"
+        
+        # 5. 落地为 CSV 文件
+        # index=False 丢弃无意义的 RangeIndex，节省存储空间
+        # encoding='utf-8-sig' 确保包含中文时（如列名）Excel 打开不乱码
+        chunk_df.to_csv(csv_file_path, index=False, encoding='utf-8-sig')
+        
+        file_idx += 1
+   
+    print(f"✅ {stock_code} 转换成功！共处理 {total_rows} 行，生成 {file_idx - 100} 个文件，存放至: {output_dir}")
+        
+
+
+def check_file_time_boundary(file_path, time_col, date):
+    df = pd.read_parquet(file_path, columns=[time_col], filters=[('TradingDay', '==', date)])
+        
+    if len(df) < 4:
+        return True, "数据行数不足4行"
+    
+    # 提取首 2 行和末尾 2 行
+    headtime = df[time_col].iloc[0]
+    tailtime = df[time_col].iloc[-1]
+    
+    # 内部工具函数：将各种奇葩的 L2 时间格式统一转化为 datetime.time
+    def parse_to_time(val):
+        if isinstance(val, (pd.Timestamp, datetime.datetime)):
+            return val.time()
+        s = str(int(float(val))).zfill(9)  # 补齐到9位: HHMMSSmmm
+        hh = int(s[0:2])
+        mm = int(s[2:4])
+        ss = int(s[4:6])
+        return datetime.time(hh, mm, ss)
+
+    head_times = parse_to_time(headtime)
+    tail_times = parse_to_time(tailtime)
+    
+    morning_limit = datetime.time(9, 25, 0)
+    afternoon_limit = datetime.time(14, 59, 0)
+    
+    # 🎯 校验逻辑：
+    is_missing_morning = head_times >= morning_limit 
+    is_missing_afternoon = tail_times <= afternoon_limit 
+
+    has_missing = False
+    missing_desc = None
+
+    if is_missing_morning and is_missing_afternoon:
+        has_missing = True
+        missing_desc = f"缺失{head_times}前及{tail_times}后"
+    elif is_missing_morning:
+        has_missing = True
+        missing_desc = f"缺失{head_times}前"
+    elif is_missing_afternoon:
+        has_missing = True
+        missing_desc = f"缺失{tail_times}后"
+    
+    return has_missing, missing_desc
+
+def process_single_stock_day(date, stock_code):
+    daily_feature_dict={}
+
+    #order_file = CONFIG.base_path['A_LEVEL2']/f"202605/order/{stock_code}.parquet"
+    #deal_file = CONFIG.base_path['A_LEVEL2']/f"202605/deal/{stock_code}.parquet"
+    #snapshot_file = CONFIG.base_path['A_LEVEL2']/f"202605/snapshot/{stock_code}.parquet"
+
+    order_file = CONFIG.base_path['A_LEVEL2']/f"order/2026/202605/{stock_code}.parquet"
+    deal_file = CONFIG.base_path['A_LEVEL2']/f"deal/2026/202605/{stock_code}.parquet"
+    snapshot_file = CONFIG.base_path['A_LEVEL2']/f"snapshot/2026/202605/{stock_code}.parquet"
+    
+    assert order_file.exists(), f"Error: '{order_file}'"
+    assert deal_file.exists(), f"Error: '{deal_file}'"
+    assert snapshot_file.exists(), f"Error: '{snapshot_file}'"
+        
+
+    ob_all = playback_and_rebuild(order_file, deal_file, snapshot_file, date=date)
+
+    
+    return ob_all
+
 def get_allstock():
     srcpath = CONFIG.tdx_data_path[DATAFRAME['DAY']]/'all_stock_daily.parquet'
 
@@ -447,11 +588,11 @@ def batch_process_l2_data(base_path, date_str, target_stocks, include_types=None
         if file_path.exists():
             l2_task_mapping[data_type](srcpath=file_path, target_stocks=target_stocks)
 
-def cal_tradingday(pfile, collist=None):
+def cal_itemcounts(pfile, collist=None):
     array_arrow = pq.read_table(pfile, columns=collist).column(0)
-    trading_days = array_arrow.to_numpy()
+    select_items = array_arrow.to_numpy()
 
-    unique_days, counts = np.unique(trading_days, return_counts=True)
+    unique_items, counts = np.unique(select_items, return_counts=True)
     col_str = ", ".join(collist)
     # 3. 优雅地打印结果
     print(f"📊 每日 Level 2 逐笔数据量统计：")
@@ -459,21 +600,21 @@ def cal_tradingday(pfile, collist=None):
     print(f"{col_str:<15} | {'频次 (Counts)' :<15}")
     print("-" * 35)
 
-    for day, count in zip(unique_days, counts):
+    for item, count in zip(unique_items, counts):
         # 如果读取出来的日期是 bytes 类型（Parquet 中常见的 string 表现），需要 decode 一下
-        if isinstance(day, bytes):
-            day = day.decode('utf-8')
-        print(f"{day:<15} | {count:<15,}") # :, 可以在数字中自动加上千分位逗号，方便肉眼阅读
+        if isinstance(item, bytes):
+            item = item.decode('utf-8')
+        print(f"{item:<15} | {count:<15,}") # :, 可以在数字中自动加上千分位逗号，方便肉眼阅读
 
     print("-" * 35)
-    print(f"总计数据量: {len(trading_days):,} 行")
+    print(f"总计数据量: {len(select_items):,} 行")
 
 def load_and_merge_orderflow(order_file, deal_file, snapshot_file):
-    #cal_tradingday(order_file, collist=['BizIndex'])
-    #cal_tradingday(order_file, collist=['Channel'])
-    #cal_tradingday(order_file, collist=['LastPrice'])
-    cal_tradingday(order_file, collist=['OrderType'])
-    cal_tradingday(deal_file, collist=['Side'])
+    #cal_itemcounts(order_file, collist=['BizIndex'])
+    #cal_itemcounts(order_file, collist=['Channel'])
+    #cal_itemcounts(order_file, collist=['LastPrice'])
+    cal_itemcounts(order_file, collist=['OrderType'])
+    cal_itemcounts(deal_file, collist=['Side'])
 
     
     # 1. 读取数据（如果是 Parquet 效率极高）

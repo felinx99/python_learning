@@ -1,5 +1,4 @@
 import logging
-import os
 import talib as ta
 from datetime import datetime
 import pandas as pd
@@ -15,7 +14,6 @@ from common import CONFIG, DATAFRAME
 LOG_FILE = CONFIG.inferred_path['RESULT_PATH']/'logs'/f"pipeline_{datetime.now().strftime('%Y%m%d')}.log"
 
 # 配置日志
-os.makedirs("./logs", exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -27,7 +25,7 @@ def price_loader(code, start_date):
     这里对接你第一步下载的本地数据文件
     """
     file_path = CONFIG.tdx_data_path[DATAFRAME['DAY']]/f'{code}.csv'
-    if os.path.exists(file_path):
+    if file_path.exists():
         df = pd.read_csv(file_path, index_col='date', parse_dates=True)
         df['atr'] = ta.ATR(df['high'], df['low'], df['close'], timeperiod=CONFIG.params['ATR_WINDOW'])
         return df.loc[start_date:]
