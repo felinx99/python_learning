@@ -86,7 +86,8 @@ def read_tdx_files(args):
 def download_stock():
     task_filelist = []
 
-    for exchange, dateframe in itertools.product(CONFIG.EXCHANGE, DATAFRAME):
+    #for exchange, dateframe in itertools.product(CONFIG.EXCHANGE, DATAFRAME):
+    for exchange, dateframe in itertools.product(CONFIG.EXCHANGE, DATAFRAME.DAY):
         directory = CONFIG.inferred_path['TDX_INSTALL_DATADIR']/exchange/CONFIG.src_dir[dateframe]  
         new_filelist = [(p, dateframe) for p in directory.glob(CONFIG.file_extension[dateframe])]
         task_filelist.extend(new_filelist)
