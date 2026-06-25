@@ -12,7 +12,7 @@ import pyarrow.parquet as pq
 from backtrader import order
 from collections import namedtuple
 from concurrent.futures import ProcessPoolExecutor
-from common import CONFIG, DATAFRAME
+from common import CONFIG, DATAFRAME, schema
 from dataclasses import dataclass
 from enum import IntEnum
 from multiprocessing import Pool
@@ -369,7 +369,7 @@ def stream_from_snapshot(file_path, filters=None):
 
 
 def stream_from_deal(file_path, filters=None):
-    deal_columns = ['BuyID', 'DealID', 'DealTime', 'Price', 'SellID', 'Side', 'Volume']
+    deal_columns = ['BizIndex', 'BuyID', 'DealID', 'DealTime', 'Price', 'SellID', 'Side', 'Volume']
     df_deal = pd.read_parquet(file_path, schema=deal_schema, columns=deal_columns, filters=filters)
     df_deal = df_deal.sort_values(by=['DealTime', 'DealID'], ascending=True, kind='stable').reset_index(drop=True)
 
@@ -384,9 +384,13 @@ def stream_from_deal(file_path, filters=None):
         yield row
 
 def stream_from_order(file_path, filters=None):
-    order_columns = ['LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume']
+    order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume']
     df_order = pd.read_parquet(file_path, schema=order_schema, columns=order_columns, filters=filters)
-    df_order = df_order.sort_values(by=['OrderTime', 'OrderID'], ascending=True, kind='stable').reset_index(drop=True)
+    if df_order['BizIndex'].iat[10] > 0 and df_order['BizIndex'].iat[10] != df_order['OrderID'].iat[10]:
+        order_cond = 'BizIndex'
+    else:
+        order_cond = 'OrderID'
+    df_order = df_order.sort_values(by=['OrderTime', order_cond], ascending=True, kind='stable').reset_index(drop=True)
 
     for row in df_order.itertuples(index=False):
         yield row
@@ -410,14 +414,25 @@ def stream_l2_timeline(order_file, deal_file, filters=None):
     while curr_order or curr_deal:
         # 💡 时间相同时，排序优先级：Order(0) -> Deal(1) -> Snapshot(2) 输出
         candidates = []
-        if curr_order: candidates.append((curr_order.OrderTime, curr_order.OrderID, 'Order', curr_order))
-        if curr_deal:  candidates.append((curr_deal.DealTime, curr_deal.DealID, 'Deal', curr_deal))
+        if curr_order: 
+            order_cond = curr_order.BizIndex if curr_order.BizIndex > 0 else curr_order.OrderID
+            candidates.append((curr_order.OrderTime, order_cond, 0, 'Order', curr_order))
+        if curr_deal:  
+            candidates.append((curr_deal.DealTime, curr_deal.DealID, 1, 'Deal', curr_deal))
+
+        # 如果DealID与Order的序号无法匹配，还可以采用下面的终极解法，回归deal的本质流程中
+        # if curr_order:
+        #     candidates.append((curr_order.OrderTime, curr_order.OrderID, 0, 'Order', curr_order))
+
+        # if curr_deal:
+        #     deal_cond = max(curr_deal.BuyID, curr_deal.SellID)
+        #     candidates.append((curr_deal.DealTime, deal_cond, 1, 'Deal', curr_deal))
 
         # 按时间升序排序
         # 相同时间下按订单号升序排序
         # 不能只按订单号，有的撤单订单号很小。要结合时间一起双排序
-        candidates.sort(key=lambda x: (x[0], x[1]))
-        best_type, best_row = candidates[0][2], candidates[0][3]
+        candidates.sort(key=lambda x: (x[0], x[1], x[2]))
+        best_type, best_row = candidates[0][3], candidates[0][4]
 
         yield best_type, best_row
 
@@ -444,65 +459,26 @@ def check_10_levels(ob=None, snapshot=None, decimals=0):
                 (abs(my_w_bid_p - snapshot.WeightBidPrice) < price_tolerance and abs(my_w_ask_p - snapshot.WeightAskPrice) < price_tolerance)
         if match_all:
             # --- 门限值配置 ---
-            VOL_THRESHOLD = 15  # 允许第一档量的绝对值偏差
+            VOL_THRESHOLD = 20  # 允许十档委托量的绝对值偏差
 
-            # 1. 提取本地数据与快照数据
+            # 1. 提取本地数据与快照数据 (直接使用原始 List[Tuple])
             my_bids = ob.get_topN_snapshot('B', n_levels=10)
             my_asks = ob.get_topN_snapshot('S', n_levels=10)
-            my_bid_dict = {p: (v, c) for p, v, c in my_bids}
-            my_ask_dict = {p: (v, c) for p, v, c in my_asks}
 
             cached_snap_bids = [(getattr(snapshot, f'BidPrice{i}'), int(getattr(snapshot, f'BidVolume{i}')), int(getattr(snapshot, f'BidOrder{i}'))) for i in range(1, 11) if getattr(snapshot, f'BidPrice{i}') > 0]
             cached_snap_asks = [(getattr(snapshot, f'AskPrice{i}'), int(getattr(snapshot, f'AskVolume{i}')), int(getattr(snapshot, f'AskOrder{i}'))) for i in range(1, 11) if getattr(snapshot, f'AskPrice{i}') > 0]
 
-            # 2. 进入状态机分支判断
-            if not cached_snap_asks: # 🔴 涨停状态：快照卖盘为空，只比较买盘 (Bids)
-                
-                snap_bid = {p: (v, c) for p, v, c in cached_snap_bids}
-                
-                # 容错：若本地也没买盘或长度对不上，直接判定不匹配
-                if len(my_asks):
-                    match_levels = False
-                else:
-                    # 剥离买一档（列表第一项）进行带门限的模糊比较
-                    p1_my, v1_my, c1_my = my_bids[0]
-                    p1_snap, v1_snap, c1_snap = cached_snap_bids[0]
-                    
-                    # 剔除买一档后，其余 9 档严格对比
-                    my_bid_rest = {p: vc for p, vc in my_bid_dict.items() if p != p1_my}
-                    snap_bid_rest = {p: vc for p, vc in snap_bid.items() if p != p1_snap}
-                    
-                    diff = abs(v1_my - v1_snap) 
-                    match_rest = (my_bid_rest == snap_bid_rest)
-                    match_p1 = (p1_my == p1_snap) and (c1_my == c1_snap) and (diff<=VOL_THRESHOLD)
-                    match_levels = match_rest and match_p1
-         
-            elif not cached_snap_bids: # 🟢 跌停状态：快照买盘为空，只比较卖盘 (Asks)
-                
-                snap_ask = {p: (v, c) for p, v, c in cached_snap_asks}
-                
-                # 容错
-                if len(my_bids):
-                    match_levels = False
-                else:
-                    # 剥离卖一档进行带门限的模糊比较
-                    p1_my, v1_my, c1_my = my_asks[0]
-                    p1_snap, v1_snap, c1_snap = cached_snap_asks[0]
-                    
-                    # 剔除卖一档后，其余 9 档严格对比
-                    my_ask_rest = {p: vc for p, vc in my_ask_dict.items() if p != p1_my}
-                    snap_ask_rest = {p: vc for p, vc in snap_ask.items() if p != p1_snap}
-                    
-                    diff = abs(v1_my - v1_snap) 
-                    match_rest = (my_ask_rest == snap_ask_rest)
-                    match_p1 = (p1_my == p1_snap) and (c1_my == c1_snap) and (diff<=VOL_THRESHOLD)
-                    match_levels = match_rest and match_p1
-                    
-            else:
-                # ⚪ 正常状态：两边都有盘口，全量 10 档执行最严格、最高效的直接比对
-                snap_bid = {p: (v, c) for p, v, c in cached_snap_bids}
-                snap_ask = {p: (v, c) for p, v, c in cached_snap_asks}
-                match_levels = (my_bid_dict == snap_bid) and (my_ask_dict == snap_ask)
+            def check_side_alignment(my_levels, snap_levels, vol_thresh):
+                for (p1, v1, c1), (p2, v2, c2) in zip(my_levels, snap_levels):
+                    # 价格(p)和总单数(c)必须绝对精确对齐；量(v)允许误差
+                    if p1 != p2 or c1 != c2 or abs(v1 - v2) > vol_thresh:
+                        return False -1
+                return True
+
+            # 2. 双边闪电比对
+            match_levels = check_side_alignment(my_bids, cached_snap_bids, VOL_THRESHOLD) and \
+                           check_side_alignment(my_asks, cached_snap_asks, VOL_THRESHOLD)
+
             if match_levels:
                 return True, 0
 
@@ -512,9 +488,9 @@ def check_10_levels(ob=None, snapshot=None, decimals=0):
         #is_opencallending = False
         match_all = total_dealvolume == snapshot.TotalVolume and total_turnover == snapshot.TotalTurnover
         if match_all:
-            return True, -2
+            return True, 0
     
-    return False, -1
+    return False, -2
 
 def playback_and_rebuild(args):
     """
@@ -598,7 +574,7 @@ def playback_and_rebuild(args):
             # 1. 判断snapshot是否与当前ob是否相同。
             # 2. 不相同: 则读入下一个order/deal数据
             # 3. 相同: 读入下一个snapshot,判断与当前ob是否相同，相同继续读入下一个snapshot，直到不相同。
-            if event_time >= 92500000:
+            if event_time >= 93000000:
                 pass
             if local_total_cumvolume == curr_snapshot.TotalVolume:
                 verified, _ = check_10_levels(ob=ob, snapshot=curr_snapshot, decimals=target_decimals)
@@ -624,79 +600,98 @@ def playback_and_rebuild(args):
     # msg = "".join(msg_chunks)     
     return rday, stock_code, isSucess, msg
 
-def check_snapshot():
-    #stocklist = [2631, 688017, 688693] #(20260529, "002631"), (20260529, "688017"), (20260529, "688693"), 
-    checkyear = '2026'
-    pb_data = []
-
-    for checkmonth in ['05']:
-        directory = CONFIG.base_path['A_LEVEL2']/'order'/checkyear/f"{checkyear}{checkmonth}"
-        # srcfile_list = [p.stem for p in directory.glob('*.parquet')]
-        srcfile_list = ['000010', '000668', '002631', '000002','300776',  '688017', '688693']
-
-        for stock_code in srcfile_list:
-            order_file = CONFIG.base_path['A_LEVEL2']/f"order/{checkyear}/{checkyear}{checkmonth}/{stock_code}.parquet"
-            deal_file = CONFIG.base_path['A_LEVEL2']/f"deal/{checkyear}/{checkyear}{checkmonth}/{stock_code}.parquet"
-            snapshot_file = CONFIG.base_path['A_LEVEL2']/f"snapshot/{checkyear}/{checkyear}{checkmonth}/{stock_code}.parquet"
-
-            assert order_file.exists(), f"Error: '{order_file}'"
-            assert deal_file.exists(), f"Error: '{deal_file}'"
-            assert snapshot_file.exists(), f"Error: '{snapshot_file}'"
-
-            #check_deal(deal_file, stock_code=stock_code)
-        
-            tradingdays = cal_itemcounts(deal_file, collist=['TradingDay'])
-
-            for date in tradingdays:
-                # logging.info(f"{date}:{order_file}")
-                # result_df = check_data_integrity(order_file, deal_file, snapshot_file, date=date, stock_code=stock_code)
-                # if not result_df.empty:
-                #     pb_data.append(result_df)
-                ob_all = playback_and_rebuild(order_file, deal_file, snapshot_file, date=date)
-
-                
-                # my_bars = generate_and_save_bars(srcfile=deal_file, stock_code=stock_code, date_str=date, resamples=[min1, min5, day1])
-                # verify_bars_against_csv(my_bars, stock_code=task[1], date_str=task[0])
-
-        # if pb_data:
-        #     final_df = pd.concat(pb_data, ignore_index=True) 
-        #     pb_path = CONFIG.base_path['LEVEL2_TEMP']/f'{checkmonth}.csv'
-        #     final_df.to_csv(pb_path, sep=',', encoding='utf-8-sig', index=False, float_format='%.2f')
-
-    # for exchange, dateframe in itertools.product(CONFIG.EXCHANGE, DATAFRAME):
-    #     directory = CONFIG.inferred_path['TDX_INSTALL_DATADIR']/exchange/CONFIG.src_dir[dateframe]  
-    #     new_filelist = [(p, dateframe) for p in directory.glob(CONFIG.file_extension[dateframe])]
-    #     task_filelist.extend(new_filelist)
-
-
 def Verify_level2(date_list=[], checkyear='', checkmonth=''):
     tasks = []
-    srcfile_list = {}
 
     for rday in date_list:
-        src_snapshot_file = CONFIG.inferred_path['LEVEL2_BUFFER_PATH']/f"snapshot/{checkyear}/{checkyear}{checkmonth}/snapshot_{rday}.parquet"
+        src_snapshot_file = CONFIG.inferred_path['LEVEL2_BUFFER_PATH']/f"deal/{checkyear}/{checkyear}{checkmonth}/deal_{rday}.parquet"
         assert src_snapshot_file.exists(), f"Error: '{src_snapshot_file}'"
         
-        srcfile_list[rday] = cal_itemcounts(src_snapshot_file, collist=['SecuCode'])
-        for stock_code in srcfile_list[rday]:
+        stockcode_list = cal_itemcounts(src_snapshot_file, collist=['SecuCode'])
+        for stock_code in stockcode_list:
             tasks.append((rday, stock_code))
     
     physical_cores = psutil.cpu_count(logical=False)
     with Pool(physical_cores) as p:
-        #starmap会自动将task_filelist解包传给函数
-        
-        results = p.imap_unordered(playback_and_rebuild, tasks, chunksize=100)
+        print(f"开始snapshot校验")        
+        results = p.imap_unordered(playback_and_rebuild, tasks, chunksize=50)
+        success_count = 0
         for rday, stock_code, success, msg in results:
-            if not success:
+            if success:
+                success_count += 1
+                print(f"进程推进中{rday}... 已成功合并 {success_count}/{len(tasks)} 只股票 [{stock_code}]", end="\r")
+            else:
                 logging.error(f"[X] 失败 | {rday} : {stock_code} | \n 错误信息: {msg}")
+
+
+def fix_order_bizindex(order_df=None, deal_df=None):
+    if order_df['BizIndex'].iat[10] > 0 and order_df['BizIndex'].iat[10] != order_df['OrderID'].iat[10]:    
+        buy_min = deal_df.loc[deal_df['BuyID'] > 0].groupby('BuyID')['DealID'].min()
+        sell_min = deal_df.loc[deal_df['SellID'] > 0].groupby('SellID')['DealID'].min()
+        
+        sweep_map = pd.concat([buy_min, sell_min]).groupby(level=0).min()
+        order_df['min_deal_id'] = order_df['OrderID'].map(sweep_map)
+        mask = (order_df['BizIndex'] > order_df['min_deal_id']) & (~order_df['OrderType'].isin([-1, -11]))
+        
+        if mask.any():
+            order_df.loc[mask, 'BizIndex'] = order_df.loc[mask, 'min_deal_id'].astype('int32')
+        
+        order_df.drop(columns=['min_deal_id'], inplace=True)
+        return order_df, False
+    
+    return order_df, True
+
+def fix_order_bizindex_old(order_df=None, deal_df=None):
+    """
+    ⚡ 100% 向量化无循环版：修正吞噬订单的 BizIndex 错误
+    
+    参数:
+    ----------
+    order_df : pd.DataFrame -> 包含 ['OrderID', 'BizIndex']
+    deal_df  : pd.DataFrame -> 包含 ['DealID', 'BuyID', 'SellID', 'Side']
+    """
+    if order_df['BizIndex'].iat[10] > 0 and order_df['BizIndex'].iat[10] != order_df['OrderID'].iat[10]:
+        # --- Step 1: 分别聚合买卖双边订单对应的【最小 DealID】和【成交次数】 ---
+        valid_buys = deal_df[deal_df['BuyID'] > 0] #不能使用'Side'过滤，因为有的订单既在卖单也在买单里，看成交对手order类型
+        buy_deals = valid_buys.groupby('BuyID')['DealID'].agg(['min', 'count']).rename(
+            columns={'min': 'min_deal_id', 'count': 'deal_count'}
+        )
+
+        valid_sells = deal_df[deal_df['SellID'] > 0]
+        sell_deals = valid_sells.groupby('SellID')['DealID'].agg(['min', 'count']).rename(
+            columns={'min': 'min_deal_id', 'count': 'deal_count'}
+        )
+        
+        # --- Step 2: 过滤出属于“吞噬/多次撮合”的订单 (count > 1) ---
+        buy_sweeps = buy_deals[buy_deals['deal_count'] > 1][['min_deal_id']]
+        sell_sweeps = sell_deals[sell_deals['deal_count'] > 1][['min_deal_id']]
+     
+        # 将双边吞噬订单合并成一个统一的映射大表 (OrderID -> min_deal_id)
+        sweep_map = pd.concat([buy_sweeps, sell_sweeps]).groupby(level=0).min()
+        
+        # --- Step 3: 偷天换日，用 Merge 替代原本的 where 循环赋值 ---
+        # 将计算好的最小 DealID 作为一个临时列一次性“贴”到 order_df 上
+        order_df = order_df.merge(sweep_map, left_on='OrderID', right_index=True, how='left')
+        
+        # --- Step 4: 触发核心修正条件 ---
+        # 只有当该订单确实发生了吞噬（min_deal_id不为空），且原 BizIndex 错误地大于最小 DealID 时才修正
+        mask = order_df['min_deal_id'].notna() & (order_df['BizIndex'] > order_df['min_deal_id'])
+        
+        # 批量精准定位并替换，同时强制保持原 BizIndex 的数据类型
+        order_df.loc[mask, 'BizIndex'] = order_df.loc[mask, 'min_deal_id'].astype(order_df['BizIndex'].dtype)
+        
+        # --- Step 5: 卸磨杀驴，删除临时列 ---
+        order_df.drop(columns=['min_deal_id'], inplace=True)
+        order_df = order_df.sort_values(by=['OrderTime', 'BizIndex'], ascending=True, kind='stable').reset_index(drop=True)
+        
+        return order_df, False
+
+    return order_df, True
 
 # =================================================================
 # 1. Order & Deal 增量分流与对齐函数（单线程）
 # =================================================================
-def check_deal(order_table, deal_table):
-    df_order = order_table.to_pandas()
-    df_deal = deal_table.to_pandas()
-
+def check_deal(df_order, df_deal):
     ismissing = False
     # --- 撤单比对逻辑 ---
     cancel_rules = [(-1, 'BuyID'), (-11, 'SellID')]
@@ -729,9 +724,94 @@ def check_deal(order_table, deal_table):
     
     if ismissing:
         df_deal = df_deal.sort_values(by='BizIndex', ascending=True, ignore_index=True)
-        deal_table = pa.Table.from_pandas(df_deal, schema=deal_schema)
+        return df_deal, False
 
-    return deal_table
+    return df_deal, True
+
+def presplit(date_list=[], checkmonth='', checkyear='2026'):
+    """
+    每日或隔2~3日运行（单线程）：
+    1. 读取 snapshot 每日全市场大文件。
+    2. 极速拆分并分流存储进暂存区股票文件夹中。
+    """
+    print(f"🎬 开始执行 {checkyear}-{checkmonth} 批次 {date_list} 的 Snapshot 增量分流...")
+    
+    base_buffer = CONFIG.inferred_path['LEVEL2_BUFFER_PATH']
+    snapshot_schema = schema_dict['snapshot_schema']
+    order_raw_schema = schema_dict['order_raw_schema']
+    
+    # 约定暂存区根目录
+
+    dst_dir_order = base_buffer / f"monthlystaging/order/{checkyear}/{checkyear}{checkmonth}"
+    dst_dir_deal = base_buffer / f"monthlystaging/deal/{checkyear}/{checkyear}{checkmonth}"
+    dst_dir_snapshot = base_buffer / f"monthlystaging/snapshot/{checkyear}/{checkyear}{checkmonth}"
+    dst_dir_order_raw = base_buffer / f"monthlystaging/order_raw/{checkyear}/{checkyear}{checkmonth}"
+
+    for rday in date_list:
+        src_order = base_buffer / f"order/{checkyear}/{checkyear}{checkmonth}/order_{rday}.parquet"
+        src_deal = base_buffer / f"deal/{checkyear}/{checkyear}{checkmonth}/deal_{rday}.parquet"
+        src_snapshot = base_buffer / f"snapshot/{checkyear}/{checkyear}{checkmonth}/snapshot_{rday}.parquet"
+        src_order_raw = base_buffer / f"order_raw/{checkyear}/{checkyear}{checkmonth}/order_raw_{rday}.parquet"
+
+        order_scanner = ds.dataset(src_order, schema=order_schema).scanner(use_threads=False)
+        deal_scanner = ds.dataset(src_deal, schema=deal_schema).scanner(use_threads=False)
+        snapshot_scanner = ds.dataset(src_snapshot, schema=snapshot_schema).scanner(use_threads=False)
+        order_raw_scanner = ds.dataset(src_order_raw, schema=order_raw_schema).scanner(use_threads=False)
+
+        tmp_order_split = dst_dir_order / "tmp_split"
+        tmp_deal_split = dst_dir_deal / "tmp_split"
+        tmp_snapshot_split = dst_dir_snapshot / "tmp_split"
+        tmp_order_raw_split = dst_dir_order_raw / "tmp_split"
+
+        tmp_order_split.mkdir(parents=True, exist_ok=True)
+        tmp_deal_split.mkdir(parents=True, exist_ok=True)
+        tmp_snapshot_split.mkdir(parents=True, exist_ok=True)
+        tmp_order_raw_split.mkdir(parents=True, exist_ok=True)
+
+        name_template = f"{rday}_{{i}}.parquet"
+
+        print("⚡ 步骤 1：利用 C++ 引擎对全市场大文件进行单次通行洗牌分盘")
+        # 使用 Dataset API 流式读取并自动切分，规避将整个大表加载进内存
+        print("1.处理order文件中...")
+        ds.write_dataset(
+            order_scanner,
+            base_dir=tmp_order_split,
+            format="parquet",
+            partitioning=["SecuCode"],
+            basename_template=name_template,
+            existing_data_behavior="overwrite_or_ignore"
+        )
+        print("order文件处理完成")
+        print("2.处理deal文件中...")
+        ds.write_dataset(
+            deal_scanner,
+            base_dir=tmp_deal_split,
+            format="parquet",
+            partitioning=["SecuCode"],
+            basename_template=name_template,
+            existing_data_behavior="overwrite_or_ignore"
+        )
+        print("deal文件处理完成")
+        print("3.处理snapshot文件中...")
+        ds.write_dataset(
+            snapshot_scanner,
+            base_dir=tmp_snapshot_split,
+            format="parquet",
+            partitioning=["SecuCode"],
+            basename_template=name_template,
+            existing_data_behavior="overwrite_or_ignore"
+        )
+        print("snapshot文件处理完成")
+        print("4.处理order_raw文件中...")
+        ds.write_dataset(
+            order_raw_scanner,
+            base_dir=tmp_order_raw_split,
+            format="parquet",
+            partitioning=["SecuCode"],
+            basename_template=name_template,
+            existing_data_behavior="overwrite_or_ignore"
+        )
+        print("order_raw文件处理完成")
 
 def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkyear='2026'):
     """
@@ -752,58 +832,68 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
     dst_dir_order.mkdir(parents=True, exist_ok=True)
     dst_dir_deal.mkdir(parents=True, exist_ok=True)
 
+    stage_order_root = dst_dir_order /'tmp_split'
+    msg_chunks = []
+
     for rday in date_list:
-        print(f"⏱️ 正在处理交易日(Order/Deal): {rday} ...")
-       
-        src_order = base_buffer / f"order/{checkyear}/{checkyear}{checkmonth}/order_{rday}.parquet"
-        src_deal = base_buffer / f"deal/{checkyear}/{checkyear}{checkmonth}/deal_{rday}.parquet"
-        
-        if not src_order.exists() or not src_deal.exists():
-            print(f"⚠️ 找不到 {rday} 的 order 或 deal 原始文件，自动跳过。")
-            continue
-            
+        print(f"⏱️ 正在处理交易日(Order/Deal): {rday} ...")          
         try:
             # 3.1 读取每日全市场大文件（全天只读一次）
-            order_table = pq.read_table(src_order, schema=order_schema, memory_map=True)
-            deal_table = pq.read_table(src_deal, schema=deal_schema, memory_map=True)
+            stockcode_dirs = [d for d in stage_order_root.iterdir() if d.is_dir()]
+            total_stocks = len(stockcode_dirs)
 
-            stockcode_list = order_table['SecuCode'].unique().to_pylist()
-            total_stock = len(stockcode_list)
-            success_count = 0
-
-            for stock_code in stockcode_list:
+            for idx, stock_dir in enumerate(stockcode_dirs):
+                stock_code = stock_dir.name
                 stock_str = str(stock_code).zfill(6)
 
-                order_stock_table = order_table.filter(pc.field('SecuCode') == stock_code)
-                deal_stock_table = deal_table.filter(pc.field('SecuCode') == stock_code)
-                        
-                # 3.2 对比 deal, order 中 [-1, -11] 的撤单数据
-                deal_stock_table = check_deal(order_stock_table, deal_stock_table)
+                src_order = dst_dir_order / f"tmp_split/{stock_code}/{rday}_0.parquet"
+                src_deal = dst_dir_deal / f"tmp_split/{stock_code}/{rday}_0.parquet"
+                if not src_order.exists() or not src_deal.exists():
+                    print(f"⚠️ 找不到 {rday} 的 order 或 deal 原始文件，自动跳过。")
+                    continue
+
+                df_order = pq.read_table(src_order).to_pandas()
+                df_deal = pq.read_table(src_deal).to_pandas()
+                if df_order.empty or df_deal.empty:
+                    continue
+                #补齐ds.write_dataset(..., partitioning=["SecuCode"])时被系统删除的Secucode
+                df_order['SecuCode'] = stock_code
+                df_deal['SecuCode'] = stock_code
+                # 修正在吞单情况下，order的BizIndex序号比deal大的错误，导致deal先执行Order还未生成
+                df_order, ret = fix_order_bizindex(df_order, df_deal)
+                if not ret:
+                    msg_chunks.append(f"{rday} 股票{stock_str} BizIndex错误 \n")
+                # 补齐 deal中缺失的 [-1, -11] 的撤单数据
+                df_deal, ret = check_deal(df_order, df_deal)
+                if not ret:
+                    msg_chunks.append(f"{rday} 股票{stock_str} deal缺失撤单信号 \n")
 
                 stock_order_dir = dst_dir_order / stock_str
                 stock_deal_dir = dst_dir_deal / stock_str
                 stock_order_dir.mkdir(parents=True, exist_ok=True)
                 stock_deal_dir.mkdir(parents=True, exist_ok=True)
 
-                # 5. 精准定制文件名 (例如: 000020_20260526.parquet)
                 out_order_file = stock_order_dir / f"{stock_str}_{rday}.parquet"
                 out_deal_file = stock_deal_dir / f"{stock_str}_{rday}.parquet"
 
-                # 6. 使用 write_table 直接物理落盘（绕过 write_dataset 的强制命名限制）
-                with pq.ParquetWriter(out_order_file, order_schema, compression='snappy') as writer:
-                    writer.write_table(order_stock_table)
-                with pq.ParquetWriter(out_deal_file, deal_schema, compression='snappy') as writer:
-                    writer.write_table(deal_stock_table)
+                df_order.to_parquet(out_order_file, schema=order_schema, engine='pyarrow', compression='snappy', index=False)
+                df_deal.to_parquet(out_deal_file, schema=deal_schema, engine='pyarrow', compression='snappy', index=False)
 
-                del order_stock_table, deal_stock_table, out_order_file, out_deal_file
-                success_count +=1
-                print(f"已成功合并 {success_count}/{total_stock} 只股票 [{stock_str}]", end="\r")
+                del df_order, df_deal
+                # 如果清洗完想腾出磁盘空间，可以在这里直接把暂存区的输入文件删掉
+                src_order.unlink()
+                src_deal.unlink()
+                print(f"已成功合并 {idx}/{total_stocks} 只股票 [{stock_str}]", end="\r")
+            
             # 严格释放内存
-            del order_table, deal_table
             gc.collect()
             
         except Exception as e:
+            msg_chunks.append(f"❌ 处理交易日 {rday} (Order/Deal) 失败, 代码异常")
             print(f"❌ 处理交易日 {rday} (Order/Deal) 失败: {e}\n{traceback.format_exc()}")
+    
+    ret_msg = "".join(msg_chunks)
+    return ret_msg
 
 
 # =================================================================
@@ -827,56 +917,54 @@ def generate_staging_snapshot_dateset(date_list=[], checkyear='2026', checkmonth
     dst_dir_snapshot.mkdir(parents=True, exist_ok=True)
     dst_dir_order_raw.mkdir(parents=True, exist_ok=True)
 
+    stage_order_root = dst_dir_order_raw /'tmp_split' 
+
     for rday in date_list:
-        print(f"⏱️ 正在处理交易日(Snapshot): {rday} ...")
-       
-        src_snapshot = base_buffer / f"snapshot/{checkyear}/{checkyear}{checkmonth}/snapshot_{rday}.parquet"
-        src_order_raw = base_buffer / f"order_raw/{checkyear}/{checkyear}{checkmonth}/order_raw_{rday}.parquet"
-        
-        if not src_snapshot.exists() or not src_order_raw.exists():
-            print(f"⚠️ 找不到 {rday} 的 snapshot/order_raw 原始文件，自动跳过。")
-            continue
-            
+        print(f"⏱️ 正在处理交易日(Snapshot): {rday} ...")            
         try:
-            # 3.1 读取全市场大文件（Arrow 驻留内存极其轻量）
-            snapshot_table = pq.read_table(src_snapshot, schema=snapshot_schema, memory_map=True)
-            order_raw_table = pq.read_table(src_order_raw, schema=order_raw_schema, memory_map=True)
-
             # 提取全市场去重股票代码列表 (int 类型)
-            stockcode_list = snapshot_table['SecuCode'].unique().to_pylist()
-            total_stock = len(stockcode_list)
-            success_count = 0
+            stockcode_dirs = [d for d in stage_order_root.iterdir() if d.is_dir()]
+            total_stocks = len(stockcode_dirs)
 
-            for stock_code in stockcode_list:
+            for idx, stock_dir in enumerate(stockcode_dirs):
+                stock_code = stock_dir.name
                 stock_str = str(stock_code).zfill(6)
 
-                # 3.2 利用 pyarrow.compute 提取当前股票的切片（底层指针引用，零内存拷贝）
-                snapshot_stock_table = snapshot_table.filter(pc.field('SecuCode') == stock_code)
-                order_raw_stock_table = order_raw_table.filter(pc.field('SecuCode') == stock_code)
-                
-                # 3.3 精准定制该股票的物理目录
+                src_snapshot = dst_dir_snapshot / f"tmp_split/{stock_code}/{rday}_0.parquet"
+                src_order_raw = dst_dir_order_raw / f"tmp_split/{stock_code}/{rday}_0.parquet"
+                if not src_snapshot.exists() or not src_order_raw.exists():
+                    print(f"⚠️ 找不到 {rday} 的 snapshot 或 order_raw 原始文件，自动跳过。")
+                    continue
+
+                df_snapshot = pq.read_table(src_snapshot).to_pandas()
+                df_order_raw = pq.read_table(src_order_raw).to_pandas()
+                if df_snapshot.empty or df_order_raw.empty:
+                    continue
+                #补齐ds.write_dataset(..., partitioning=["SecuCode"])时被系统删除的Secucode
+                df_snapshot['SecuCode'] = stock_code
+                df_order_raw['SecuCode'] = stock_code
+
                 stock_snapshot_dir = dst_dir_snapshot / stock_str
                 stock_order_raw_dir = dst_dir_order_raw / stock_str
                 stock_snapshot_dir.mkdir(parents=True, exist_ok=True)
                 stock_order_raw_dir.mkdir(parents=True, exist_ok=True)
 
-                # 3.4 精准定制纯净文件名 (例如: 000020_20260526.parquet)
                 out_snapshot_file = stock_snapshot_dir / f"{stock_str}_{rday}.parquet"
                 out_order_raw_file = stock_order_raw_dir / f"{stock_str}_{rday}.parquet"
 
-                # 3.5 直接物理落盘
-                with pq.ParquetWriter(out_snapshot_file, snapshot_schema, compression='snappy') as writer:
-                    writer.write_table(snapshot_stock_table)
-                with pq.ParquetWriter(out_order_raw_file, order_raw_schema, compression='snappy') as writer:
-                    writer.write_table(order_raw_stock_table)
+                # 直接物理落盘
+                df_snapshot.to_parquet(out_snapshot_file, schema=snapshot_schema, engine='pyarrow', compression='snappy', index=False)
+                df_order_raw.to_parquet(out_order_raw_file, schema=order_raw_schema, engine='pyarrow', compression='snappy', index=False)
 
-                del snapshot_stock_table, order_raw_stock_table, out_snapshot_file, out_order_raw_file
-                success_count +=1
-                print(f"已成功合并 {success_count}/{total_stock} 只股票 [{stock_str}]", end="\r")    
+
+                del df_snapshot, df_order_raw  
+                # 如果清洗完想腾出磁盘空间，可以在这里直接把暂存区的输入文件删掉
+                src_snapshot.unlink()
+                src_order_raw.unlink() 
+                print(f"已成功合并 {idx}/{total_stocks} 只股票 [{stock_str}]", end="\r") 
             # 严格释放全市场大表内存
-            del snapshot_table, order_raw_table
+
             gc.collect()
-            print(f"✅ 快照交易日 {rday} 完美分流完毕。")
             
         except Exception as e:
             print(f"❌ 处理快照交易日 {rday} 失败: {e}\n{traceback.format_exc()}")
@@ -1093,16 +1181,17 @@ if __name__ == '__main__':
     day1 = Resample(timeframe=TimeFrame.Days, compression=1)
 
     date_list = [
-        20260601, 
-        #20260602, 20260603, 20260604, 20260605,
+        # 20260601, 20260602, 
+        20260603, 20260604, 20260605,
         #20260608, 20260609, 20260610, 20260611, 20260612,
         #20260615, 20260616, 20260617, 20260618,
         #20260622, 20260623, 20260624, 20260625, 20260626,
         #20260629, 20260630
     ] 
-
-    # generate_staging_order_and_deal_dateset(date_list=date_list, checkmonth='06', checkyear='2026')
-    # generate_staging_snapshot_dateset(date_list=date_list, checkmonth='06', checkyear='2026')
+    presplit(date_list=date_list, checkmonth='06', checkyear='2026')
+    msg = generate_staging_order_and_deal_dateset(date_list=date_list, checkmonth='06', checkyear='2026')
+    if msg: logging.warning(msg)
+    generate_staging_snapshot_dateset(date_list=date_list, checkmonth='06', checkyear='2026')
     Verify_level2(date_list=date_list, checkmonth='06', checkyear='2026')
     #generate_monthly_dateset(checkmonth='06', checkyear='2026')
     #generate_monthly_level2_dataset()

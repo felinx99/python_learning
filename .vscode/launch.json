@@ -159,11 +159,11 @@
         },
 
         {
-            "name": "Level2: Level2 analysis",
+            "name": "Level2: Level2 sanitize",
             "type": "debugpy",
             "console": "integratedTerminal",
             "request": "launch",
-            "module": "backtest.st_level2_analysis",
+            "module": "backtest.st_level2_sanitize",
             "cwd": "${workspaceFolder}",
             "justMyCode": false
         },
