@@ -1,6 +1,8 @@
 import logging
 import datetime
+from types import coroutine
 import psutil
+import shutil
 import traceback
 import gc
 import pyarrow as pa
@@ -88,155 +90,11 @@ LABEL_MAP = {
     TimeFrame.Years: "y"
 }
 
-snapshot_schema = pa.schema([
-    ('AskOrder1', pa.int32()),
-    ('AskOrder2', pa.int32()),
-    ('AskOrder3', pa.int32()),
-    ('AskOrder4', pa.int32()),
-    ('AskOrder5', pa.int32()),
-    ('AskOrder6', pa.int32()),
-    ('AskOrder7', pa.int32()),
-    ('AskOrder8', pa.int32()),
-    ('AskOrder9', pa.int32()),
-    ('AskOrder10', pa.int32()),
-    ('AskPrice1', pa.int32()),
-    ('AskPrice2', pa.int32()),
-    ('AskPrice3', pa.int32()),
-    ('AskPrice4', pa.int32()),
-    ('AskPrice5', pa.int32()),
-    ('AskPrice6', pa.int32()),
-    ('AskPrice7', pa.int32()),
-    ('AskPrice8', pa.int32()),
-    ('AskPrice9', pa.int32()),
-    ('AskPrice10', pa.int32()),
-    ('AskVolume1', pa.int64()),
-    ('AskVolume2', pa.int64()),
-    ('AskVolume3', pa.int64()),
-    ('AskVolume4', pa.int64()),
-    ('AskVolume5', pa.int64()),
-    ('AskVolume6', pa.int64()),
-    ('AskVolume7', pa.int64()),
-    ('AskVolume8', pa.int64()),
-    ('AskVolume9', pa.int64()),
-    ('AskVolume10', pa.int64()),
-    ('BidOrder1', pa.int32()),
-    ('BidOrder2', pa.int32()),
-    ('BidOrder3', pa.int32()),
-    ('BidOrder4', pa.int32()),
-    ('BidOrder5', pa.int32()),
-    ('BidOrder6', pa.int32()),
-    ('BidOrder7', pa.int32()),
-    ('BidOrder8', pa.int32()),
-    ('BidOrder9', pa.int32()),
-    ('BidOrder10', pa.int32()),
-    ('BidPrice1', pa.int32()),
-    ('BidPrice2', pa.int32()),
-    ('BidPrice3', pa.int32()),
-    ('BidPrice4', pa.int32()),
-    ('BidPrice5', pa.int32()),
-    ('BidPrice6', pa.int32()),
-    ('BidPrice7', pa.int32()),
-    ('BidPrice8', pa.int32()),
-    ('BidPrice9', pa.int32()),
-    ('BidPrice10', pa.int32()),
-    ('BidVolume1', pa.int64()),
-    ('BidVolume2', pa.int64()),
-    ('BidVolume3', pa.int64()),
-    ('BidVolume4', pa.int64()),
-    ('BidVolume5', pa.int64()),
-    ('BidVolume6', pa.int64()),
-    ('BidVolume7', pa.int64()),
-    ('BidVolume8', pa.int64()),
-    ('BidVolume9', pa.int64()),
-    ('BidVolume10', pa.int64()),
-    ('DealNum', pa.int64()),
-    ('Price', pa.int32()),
-    ('SecuCode', pa.int32()),
-    ('TickTime', pa.int32()),
-    ('TickTimeDiff', pa.int32()),
-    ('TotalAskVolume', pa.int64()),
-    ('TotalBidVolume', pa.int64()),
-    ('TotalDealNum', pa.int64()),
-    ('TotalTurnover', pa.float64()),
-    ('TotalVolume', pa.int64()),
-    ('TradingDay', pa.int32()),
-    ('Turnover', pa.float64()), 
-    ('Volume', pa.int64()), 
-    ('WeightAskPrice', pa.float32()), 
-    ('WeightBidPrice', pa.float32()), 
-    #('__index_level_0__', pa.int64()),
-    # ... 你可以根据需要把所有百个字段写全
-])
-
-deal_schema = pa.schema([
-    ('BizIndex', pa.int32()),
-    ('BuyID', pa.int64()),
-    ('Channel', pa.int32()),
-    ('DealID', pa.int64()),
-    ('DealTime', pa.int32()),
-    ('Price', pa.int32()),
-    ('SecuCode', pa.int32()),
-    ('SellID', pa.int64()),
-    ('Side', pa.int32()),
-    ('TradingDay', pa.int32()),
-    ('Volume', pa.int64()),
-    #('__index_level_0__', pa.int64()),
-    # ... 你可以根据需要把所有百个字段写全
-])
-
-order_schema = pa.schema([
-    ('BizIndex', pa.int32()),
-    ('Channel', pa.int32()),
-    ('DBOrderID', pa.int64()),
-    ('LastPrice', pa.int32()),
-    ('OrderID', pa.int64()),
-    ('OrderTime', pa.int32()),
-    ('OrderType', pa.int32()),
-    ('Price', pa.int32()),
-    ('SecuCode', pa.int32()),
-    ('TradingDay', pa.int32()),
-    ('Volume', pa.int64()),
-    #('__index_level_0__', pa.int64()),
-    # ... 你可以根据需要把所有百个字段写全
-])
-
-orderraw_schema = pa.schema([
-    ('BizIndex', pa.int32()),
-    ('Channel', pa.int32()),
-    ('DBOrderID', pa.int64()),
-    ('OrderID', pa.int64()),
-    ('OrderTime', pa.int32()),
-    ('OrderType', pa.int32()),
-    ('Price', pa.int32()),
-    ('SecuCode', pa.int32()),
-    ('TradingDay', pa.int32()),
-    ('Volume', pa.int64()),
-    #('__index_level_0__', pa.int64()),
-    # ... 你可以根据需要把所有百个字段写全
-])
-
-index_schema = pa.schema([
-    ('ClosePrice', pa.int32()),
-    ('HighPrice', pa.int32()),
-    ('LowPrice', pa.int32()),
-    ('OpenPrice', pa.int32()),
-    ('PrevClosePrice', pa.int32()),
-    ('SecuCode', pa.int32()),
-    ('SeqNo', pa.int64()),
-    ('CumTurnover', pa.float64()),
-    ('TickTime', pa.int32()),
-    ('CumVolume', pa.int64()),
-    ('Turnover', pa.float64()),
-    ('Volume', pa.int64()),
-    #('__index_level_0__', pa.int64()),
-    # ... 你可以根据需要把所有百个字段写全
-])
-
 schema_dict = {
-        'order_schema' : order_schema,
-        'order_raw_schema' : orderraw_schema,
-        'deal_schema' : deal_schema,
-        'snapshot_schema' : snapshot_schema,
+        'order_schema' : CONFIG.ORDER_SCHEMA,
+        'order_raw_schema' : CONFIG.ORDERRAW_SCHEMA,
+        'deal_schema' : CONFIG.DEAL_SCHEMA,
+        'snapshot_schema' : CONFIG.SNAPSHOT_SCHEMA,
     }
 
 def parse_deal_time(date_str, time_series):
@@ -259,7 +117,7 @@ def generate_and_save_bars(srcfile, stock_code, date_str, resamples=[]):
     :param date_str: 日期字符串, 如 '20260529'
     """
     deal_columns = ['DealTime', 'Price', 'Side', 'Volume']
-    df = pd.read_parquet(srcfile, schema=deal_schema, columns=deal_columns, filters=[('TradingDay', '==', date_str)]) 
+    df = pd.read_parquet(srcfile, schema=CONFIG.DEAL_SCHEMA, columns=deal_columns, filters=[('TradingDay', '==', date_str)]) 
 
     # 1. 确保时间戳建立索引
     df = df[~df['Side'].isin([-1, -11])]
@@ -353,7 +211,7 @@ def stream_from_snapshot(file_path, filters=None):
         snapshot_columns.extend([f'BidPrice{i}', f'BidVolume{i}', f'BidOrder{i}'])
         snapshot_columns.extend([f'AskPrice{i}', f'AskVolume{i}', f'AskOrder{i}'])
    
-    df_snapshot = pd.read_parquet(file_path, schema=snapshot_schema, columns=snapshot_columns, filters=filters)
+    df_snapshot = pd.read_parquet(file_path, schema=CONFIG.SNAPSHOT_SCHEMA, columns=snapshot_columns, filters=filters)
     df_snapshot = df_snapshot.sort_values(by=['TickTime'], ascending=True, kind='stable').reset_index(drop=True)
     # 核心清洗：金额转分逻辑（保持你原有的逻辑不变）
 
@@ -369,8 +227,8 @@ def stream_from_snapshot(file_path, filters=None):
 
 
 def stream_from_deal(file_path, filters=None):
-    deal_columns = ['BizIndex', 'BuyID', 'DealID', 'DealTime', 'Price', 'SellID', 'Side', 'Volume']
-    df_deal = pd.read_parquet(file_path, schema=deal_schema, columns=deal_columns, filters=filters)
+    deal_columns = ['BizIndex', 'Price', 'DealTime', 'Volume', 'Side', 'BuyID', 'DealID', 'SellID']
+    df_deal = pd.read_parquet(file_path, schema=CONFIG.DEAL_SCHEMA, columns=deal_columns, filters=filters)
     df_deal = df_deal.sort_values(by=['DealTime', 'DealID'], ascending=True, kind='stable').reset_index(drop=True)
 
 
@@ -385,7 +243,7 @@ def stream_from_deal(file_path, filters=None):
 
 def stream_from_order(file_path, filters=None):
     order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume']
-    df_order = pd.read_parquet(file_path, schema=order_schema, columns=order_columns, filters=filters)
+    df_order = pd.read_parquet(file_path, schema=CONFIG.ORDER_SCHEMA, columns=order_columns, filters=filters)
     if df_order['BizIndex'].iat[10] > 0 and df_order['BizIndex'].iat[10] != df_order['OrderID'].iat[10]:
         order_cond = 'BizIndex'
     else:
@@ -502,10 +360,8 @@ def playback_and_rebuild(args):
     """
     isSucess = True
 
-    rday, stock_code=args
+    rday, stock_code, checkyear, checkmonth=args
     stock_str = str(stock_code).zfill(6)
-    checkyear = '2026'
-    checkmonth = '06'
     msg = ''
 
     order_file = CONFIG.inferred_path['LEVEL2_BUFFER_PATH']/f"monthlystaging/order/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
@@ -574,7 +430,7 @@ def playback_and_rebuild(args):
             # 1. 判断snapshot是否与当前ob是否相同。
             # 2. 不相同: 则读入下一个order/deal数据
             # 3. 相同: 读入下一个snapshot,判断与当前ob是否相同，相同继续读入下一个snapshot，直到不相同。
-            if event_time >= 93000000:
+            if event_time >= 93035010:
                 pass
             if local_total_cumvolume == curr_snapshot.TotalVolume:
                 verified, _ = check_10_levels(ob=ob, snapshot=curr_snapshot, decimals=target_decimals)
@@ -609,7 +465,7 @@ def Verify_level2(date_list=[], checkyear='', checkmonth=''):
         
         stockcode_list = cal_itemcounts(src_snapshot_file, collist=['SecuCode'])
         for stock_code in stockcode_list:
-            tasks.append((rday, stock_code))
+            tasks.append((rday, stock_code, checkyear, checkmonth))
     
     physical_cores = psutil.cpu_count(logical=False)
     with Pool(physical_cores) as p:
@@ -625,6 +481,9 @@ def Verify_level2(date_list=[], checkyear='', checkmonth=''):
 
 
 def fix_order_bizindex(order_df=None, deal_df=None):
+    ret = True
+    order_cond = ''
+
     if order_df['BizIndex'].iat[10] > 0 and order_df['BizIndex'].iat[10] != order_df['OrderID'].iat[10]:    
         buy_min = deal_df.loc[deal_df['BuyID'] > 0].groupby('BuyID')['DealID'].min()
         sell_min = deal_df.loc[deal_df['SellID'] > 0].groupby('SellID')['DealID'].min()
@@ -637,9 +496,14 @@ def fix_order_bizindex(order_df=None, deal_df=None):
             order_df.loc[mask, 'BizIndex'] = order_df.loc[mask, 'min_deal_id'].astype('int32')
         
         order_df.drop(columns=['min_deal_id'], inplace=True)
-        return order_df, False
-    
-    return order_df, True
+        order_cond = 'BizIndex'
+        ret = False
+    else:
+        order_cond = 'OrderID'
+        ret = True
+
+    order_df = order_df.sort_values(by=['OrderTime', order_cond], ascending=True, kind='stable').reset_index(drop=True)
+    return order_df, ret
 
 def fix_order_bizindex_old(order_df=None, deal_df=None):
     """
@@ -692,7 +556,7 @@ def fix_order_bizindex_old(order_df=None, deal_df=None):
 # 1. Order & Deal 增量分流与对齐函数（单线程）
 # =================================================================
 def check_deal(df_order, df_deal):
-    ismissing = False
+    ismissing = True
     # --- 撤单比对逻辑 ---
     cancel_rules = [(-1, 'BuyID'), (-11, 'SellID')]
     for cancel_type, match_id_col in cancel_rules:
@@ -719,14 +583,14 @@ def check_deal(df_order, df_deal):
                     'Channel': missing_orders['Channel'],
                     'BizIndex': missing_orders['BizIndex']
                 })
-                ismissing = True
+                ismissing = False
                 df_deal = pd.concat([df_deal, missing_deal_rows], ignore_index=True)
     
-    if ismissing:
-        df_deal = df_deal.sort_values(by='BizIndex', ascending=True, ignore_index=True)
-        return df_deal, False
 
-    return df_deal, True
+    df_deal = df_deal.sort_values(by=['DealTime', 'DealID'], ascending=True, ignore_index=True)
+    return df_deal, ismissing
+
+
 
 def presplit(date_list=[], checkmonth='', checkyear='2026'):
     """
@@ -753,8 +617,8 @@ def presplit(date_list=[], checkmonth='', checkyear='2026'):
         src_snapshot = base_buffer / f"snapshot/{checkyear}/{checkyear}{checkmonth}/snapshot_{rday}.parquet"
         src_order_raw = base_buffer / f"order_raw/{checkyear}/{checkyear}{checkmonth}/order_raw_{rday}.parquet"
 
-        order_scanner = ds.dataset(src_order, schema=order_schema).scanner(use_threads=False)
-        deal_scanner = ds.dataset(src_deal, schema=deal_schema).scanner(use_threads=False)
+        order_scanner = ds.dataset(src_order, schema=CONFIG.ORDER_SCHEMA).scanner(use_threads=False)
+        deal_scanner = ds.dataset(src_deal, schema=CONFIG.DEAL_SCHEMA).scanner(use_threads=False)
         snapshot_scanner = ds.dataset(src_snapshot, schema=snapshot_schema).scanner(use_threads=False)
         order_raw_scanner = ds.dataset(src_order_raw, schema=order_raw_schema).scanner(use_threads=False)
 
@@ -771,47 +635,67 @@ def presplit(date_list=[], checkmonth='', checkyear='2026'):
         name_template = f"{rday}_{{i}}.parquet"
 
         print("⚡ 步骤 1：利用 C++ 引擎对全市场大文件进行单次通行洗牌分盘")
-        # 使用 Dataset API 流式读取并自动切分，规避将整个大表加载进内存
-        print("1.处理order文件中...")
-        ds.write_dataset(
-            order_scanner,
-            base_dir=tmp_order_split,
-            format="parquet",
-            partitioning=["SecuCode"],
-            basename_template=name_template,
-            existing_data_behavior="overwrite_or_ignore"
-        )
-        print("order文件处理完成")
-        print("2.处理deal文件中...")
-        ds.write_dataset(
-            deal_scanner,
-            base_dir=tmp_deal_split,
-            format="parquet",
-            partitioning=["SecuCode"],
-            basename_template=name_template,
-            existing_data_behavior="overwrite_or_ignore"
-        )
-        print("deal文件处理完成")
-        print("3.处理snapshot文件中...")
-        ds.write_dataset(
-            snapshot_scanner,
-            base_dir=tmp_snapshot_split,
-            format="parquet",
-            partitioning=["SecuCode"],
-            basename_template=name_template,
-            existing_data_behavior="overwrite_or_ignore"
-        )
-        print("snapshot文件处理完成")
-        print("4.处理order_raw文件中...")
-        ds.write_dataset(
-            order_raw_scanner,
-            base_dir=tmp_order_raw_split,
-            format="parquet",
-            partitioning=["SecuCode"],
-            basename_template=name_template,
-            existing_data_behavior="overwrite_or_ignore"
-        )
-        print("order_raw文件处理完成")
+        try:
+            # 使用 Dataset API 流式读取并自动切分，规避将整个大表加载进内存
+            print("1.处理order文件中...")
+            ds.write_dataset(
+                order_scanner,
+                base_dir=tmp_order_split,
+                format="parquet",
+                partitioning=["SecuCode"],
+                basename_template=name_template,
+                max_open_files=10000,
+                max_rows_per_file=0,
+                existing_data_behavior="overwrite_or_ignore"
+            )
+            print("order文件处理完成")
+            print("2.处理deal文件中...")
+            ds.write_dataset(
+                deal_scanner,
+                base_dir=tmp_deal_split,
+                format="parquet",
+                partitioning=["SecuCode"],
+                basename_template=name_template,
+                max_open_files=10000,
+                max_rows_per_file=0,
+                existing_data_behavior="overwrite_or_ignore"
+            )
+            print("deal文件处理完成")
+            print("3.处理snapshot文件中...")
+            ds.write_dataset(
+                snapshot_scanner,
+                base_dir=tmp_snapshot_split,
+                format="parquet",
+                partitioning=["SecuCode"],
+                basename_template=name_template,
+                max_open_files=10000,
+                max_rows_per_file=0,
+                existing_data_behavior="overwrite_or_ignore"
+            )
+            print("snapshot文件处理完成")
+            print("4.处理order_raw文件中...")
+            ds.write_dataset(
+                order_raw_scanner,
+                base_dir=tmp_order_raw_split,
+                format="parquet",
+                partitioning=["SecuCode"],
+                basename_template=name_template,
+                max_open_files=10000,
+                max_rows_per_file=0,
+                existing_data_behavior="overwrite_or_ignore"
+            )
+            print("order_raw文件处理完成")
+        except Exception as e:
+            print(f"❌ 写入中途崩溃！触发安全机制，正在清理脏数据... 错误: {e}")
+            if tmp_order_split.exists():
+                shutil.rmtree(tmp_order_split) # 宁可玉碎，不可留残缺文件
+            if tmp_deal_split.exists():
+                shutil.rmtree(tmp_deal_split) # 宁可玉碎，不可留残缺文件
+            if tmp_snapshot_split.exists():
+                shutil.rmtree(tmp_snapshot_split) # 宁可玉碎，不可留残缺文件
+            if tmp_order_raw_split.exists():
+                shutil.rmtree(tmp_order_raw_split) # 宁可玉碎，不可留残缺文件
+            raise e
 
 def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkyear='2026'):
     """
@@ -820,7 +704,7 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
     2. 对比补齐 deal 中缺失的 [-1, -11] 撤单数据。
     3. 增量追加进 Staging 暂存区对应的股票文件夹中。
     """
-    print(f"🎬 开始执行 {checkyear}-{checkmonth} 批次 {date_list} 的 Order & Deal 增量分流与对齐...")
+    print(f"🎬 开始执行 {checkyear}-{checkmonth} 批次 {date_list} 的 Order & Deal 增量数据清洗...")
     
     base_buffer = CONFIG.inferred_path['LEVEL2_BUFFER_PATH']
     order_schema = schema_dict['order_schema']
@@ -839,17 +723,16 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
         print(f"⏱️ 正在处理交易日(Order/Deal): {rday} ...")          
         try:
             # 3.1 读取每日全市场大文件（全天只读一次）
-            stockcode_dirs = [d for d in stage_order_root.iterdir() if d.is_dir()]
-            total_stocks = len(stockcode_dirs)
+            stockcode_list = [d.name for d in stage_order_root.iterdir() if d.is_dir()]
+            total_stocks = len(stockcode_list)
 
-            for idx, stock_dir in enumerate(stockcode_dirs):
-                stock_code = stock_dir.name
+            for idx, stock_code in enumerate(stockcode_list):
                 stock_str = str(stock_code).zfill(6)
 
                 src_order = dst_dir_order / f"tmp_split/{stock_code}/{rday}_0.parquet"
                 src_deal = dst_dir_deal / f"tmp_split/{stock_code}/{rday}_0.parquet"
                 if not src_order.exists() or not src_deal.exists():
-                    print(f"⚠️ 找不到 {rday} 的 order 或 deal 原始文件，自动跳过。")
+                    print(f"⚠️ 找不到{rday}股票{stock_str}的order或deal 原始文件，自动跳过。")
                     continue
 
                 df_order = pq.read_table(src_order).to_pandas()
@@ -868,6 +751,13 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
                 if not ret:
                     msg_chunks.append(f"{rday} 股票{stock_str} deal缺失撤单信号 \n")
 
+                #对order和deal排序
+                if df_order['BizIndex'].iat[10] > 0 and df_order['BizIndex'].iat[10] != df_order['OrderID'].iat[10]:
+                    order_cond = 'BizIndex'
+                else:
+                    order_cond = 'OrderID'
+                df_order = df_order.sort_values(by=['OrderTime', order_cond], ascending=True, kind='stable').reset_index(drop=True)
+                df_deal = df_deal.sort_values(by=['DealTime', 'DealID'], ascending=True, kind='stable').reset_index(drop=True)
                 stock_order_dir = dst_dir_order / stock_str
                 stock_deal_dir = dst_dir_deal / stock_str
                 stock_order_dir.mkdir(parents=True, exist_ok=True)
@@ -923,17 +813,16 @@ def generate_staging_snapshot_dateset(date_list=[], checkyear='2026', checkmonth
         print(f"⏱️ 正在处理交易日(Snapshot): {rday} ...")            
         try:
             # 提取全市场去重股票代码列表 (int 类型)
-            stockcode_dirs = [d for d in stage_order_root.iterdir() if d.is_dir()]
-            total_stocks = len(stockcode_dirs)
+            stockcode_list = [d.name for d in stage_order_root.iterdir() if d.is_dir()]
+            total_stocks = len(stockcode_list)
 
-            for idx, stock_dir in enumerate(stockcode_dirs):
-                stock_code = stock_dir.name
+            for idx, stock_code in enumerate(stockcode_list):
                 stock_str = str(stock_code).zfill(6)
 
                 src_snapshot = dst_dir_snapshot / f"tmp_split/{stock_code}/{rday}_0.parquet"
                 src_order_raw = dst_dir_order_raw / f"tmp_split/{stock_code}/{rday}_0.parquet"
                 if not src_snapshot.exists() or not src_order_raw.exists():
-                    print(f"⚠️ 找不到 {rday} 的 snapshot 或 order_raw 原始文件，自动跳过。")
+                    print(f"⚠️ 找不到{rday}股票{stock_str}的snapshot或order_raw 原始文件，自动跳过。")
                     continue
 
                 df_snapshot = pq.read_table(src_snapshot).to_pandas()
@@ -1181,11 +1070,11 @@ if __name__ == '__main__':
     day1 = Resample(timeframe=TimeFrame.Days, compression=1)
 
     date_list = [
-        # 20260601, 20260602, 
-        20260603, 20260604, 20260605,
-        #20260608, 20260609, 20260610, 20260611, 20260612,
-        #20260615, 20260616, 20260617, 20260618,
-        #20260622, 20260623, 20260624, 20260625, 20260626,
+        # 20260601, 20260602, 20260603, 20260604, 20260605,        
+        # 20260608, 20260609, 20260610, 20260611, 20260612,
+        # 20260615, 20260616, 20260617, 20260618,
+        # 20260622, 
+        20260623, 20260624, 20260625, 20260626,
         #20260629, 20260630
     ] 
     presplit(date_list=date_list, checkmonth='06', checkyear='2026')
@@ -1195,6 +1084,5 @@ if __name__ == '__main__':
     Verify_level2(date_list=date_list, checkmonth='06', checkyear='2026')
     #generate_monthly_dateset(checkmonth='06', checkyear='2026')
     #generate_monthly_level2_dataset()
-    tasks = [ (20260601, 600000), (20260601, 564), (20260601, 725), (20260601, 727)]
 
     
