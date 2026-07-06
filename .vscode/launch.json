@@ -169,6 +169,16 @@
         },
 
         {
+            "name": "Level2: derive signal metrics",
+            "type": "debugpy",
+            "console": "integratedTerminal",
+            "request": "launch",
+            "module": "backtest.st_level2_derivemetrics",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+
+        {
             "name": "backtest: annual_report",
             "type": "debugpy",
             "console": "integratedTerminal",

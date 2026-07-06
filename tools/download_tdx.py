@@ -117,7 +117,7 @@ def download_stock():
         header = not Path(pb_path).exists()
         table = pa.Table.from_pandas(final_df)
         
-        with pq.ParquetWriter(pb_path, table.schema, compression='snappy') as writer:
+        with pq.ParquetWriter(pb_path, table.schema, compression='zstd') as writer:
             writer.write_table(table)
 
 
@@ -190,7 +190,7 @@ def download_sector(sectorlist=[]):
         pb_path = CONFIG.inferred_path['TDX_SECTOR_PATH'] /'all_sector_dailys.parquet'
         table = pa.Table.from_pandas(final_df)
         
-        with pq.ParquetWriter(pb_path, table.schema, compression='snappy') as writer:
+        with pq.ParquetWriter(pb_path, table.schema, compression='zstd') as writer:
             writer.write_table(table)
 
 if __name__ == '__main__':
