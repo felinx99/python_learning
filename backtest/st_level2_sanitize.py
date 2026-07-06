@@ -263,15 +263,7 @@ def stream_l2_timeline(order_pl, deal_pl):
     curr_order = next(order_stream, None)
     curr_deal = next(deal_stream, None)
     
-    while curr_order or curr_deal:
-        # 💡 时间相同时，排序优先级：Order(0) -> Deal(1) -> Snapshot(2) 输出
-        candidates = []
-        if curr_order: 
-            order_cond = curr_order.BizIndex if curr_order.BizIndex > 0 else curr_order.OrderID
-            candidates.append((curr_order.OrderTime, order_cond, 0, 'Order', curr_order))
-        if curr_deal:  
-            candidates.append((curr_deal.DealTime, curr_deal.DealID, 1, 'Deal', curr_deal))
-
+    while curr_order and curr_deal:
         # 如果DealID与Order的序号无法匹配，还可以采用下面的终极解法，回归deal的本质流程中
         # if curr_order:
         #     candidates.append((curr_order.OrderTime, curr_order.OrderID, 0, 'Order', curr_order))
@@ -283,15 +275,41 @@ def stream_l2_timeline(order_pl, deal_pl):
         # 按时间升序排序
         # 相同时间下按订单号升序排序
         # 不能只按订单号，有的撤单订单号很小。要结合时间一起双排序
-        candidates.sort(key=lambda x: (x[0], x[1], x[2]))
-        best_type, best_row = candidates[0][3], candidates[0][4]
+        o_time = curr_order.OrderTime
+        o_cond = curr_order.BizIndex if curr_order.BizIndex > 0 else curr_order.OrderID
+        
+        d_time = curr_deal.DealTime
+        d_cond = curr_deal.DealID
 
-        yield best_type, best_row
-
-        if best_type == 'Order':    
+        # 优先级比较规则映射：时间小优先 -> 业务索引小优先 -> 订单优先于成交
+        if o_time < d_time:
+            yield 'Order', o_time, curr_order
             curr_order = next(order_stream, None)
-        elif best_type == 'Deal':   
+        elif d_time < o_time:
+            yield 'Deal', d_time, curr_deal
             curr_deal = next(deal_stream, None)
+        else:
+            # 当时间绝对相等时，比对第二排序列字段
+            if o_cond < d_cond:
+                yield 'Order', o_time, curr_order
+                curr_order = next(order_stream, None)
+            elif d_cond < o_cond:
+                yield 'Deal', d_time, curr_deal
+                curr_deal = next(deal_stream, None)
+            else:
+                # 业务索引也完全一致，依靠元组第三位：Order(0) 优先于 Deal(1)
+                yield 'Order', o_time, curr_order
+                curr_order = next(order_stream, None)
+
+    # 消费剩余的订单单流
+    while curr_order:
+        yield 'Order', curr_order.OrderTime, curr_order
+        curr_order = next(order_stream, None)
+
+    # 消费剩余的成交单流
+    while curr_deal:
+        yield 'Deal', curr_deal.DealTime, curr_deal
+        curr_deal = next(deal_stream, None)
 
 def check_10_levels(ob=None, snapshot=None, decimals=0):
     total_dealnum, total_dealvolume, total_turnover = ob.get_deal_status()
@@ -327,7 +345,6 @@ def check_10_levels(ob=None, snapshot=None, decimals=0):
                         return False -1
                 return True
 
-            # 2. 双边闪电比对
             match_levels = check_side_alignment(my_bids, cached_snap_bids, VOL_THRESHOLD) and \
                            check_side_alignment(my_asks, cached_snap_asks, VOL_THRESHOLD)
 
@@ -357,33 +374,32 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
         local_total_cumvolume = 0           #累积交易量，用于快速比较是否需要进行snapshot检验，不符的肯定不用检验
         
     # 直接消费磁盘流，内存开销恒定
-    for event_type, row in stream_l2_timeline(orday_daily_pl, deal_daily_pl):  
-        # 提取当前事件的时间戳 (格式形如: 91501420)
-        event_time = getattr(row, 'OrderTime', getattr(row, 'DealTime', 0))
-
+    for event_type, event_time, row in stream_l2_timeline(orday_daily_pl, deal_daily_pl):  
         if event_type == 'Order':
-            if row.OrderType == 0:    # 委买
+            order_type = row.OrderType
+            if order_type == 0:    # 委买
                 ob.insert_order(row.OrderID, row.Price, row.Volume, 'B', row.OrderTime)
-            elif row.OrderType == 10: # 委卖
+            elif order_type == 10: # 委卖
                 ob.insert_order(row.OrderID, row.Price, row.Volume, 'S', row.OrderTime)
             # elif row.OrderType in (-1, -11): # 撤买/撤卖,竞价阶段的撤销无deal记录，不能删除
             #     ob.cancel_order(row.OrderID, row.Volume)
 
-            elif row.OrderType == 1: #市价委买
+            elif order_type == 1: #市价委买
                 ob.insert_order(row.OrderID, row.LastPrice, row.Volume, 'B', row.OrderTime)                
-            elif row.OrderType == 2:    # 限价委买
+            elif order_type == 2:    # 限价委买
                 ob.insert_order(row.OrderID, row.Price, row.Volume, 'B', row.OrderTime)
-            elif row.OrderType == 3: #本方最优委买
+            elif order_type == 3: #本方最优委买
                 ob.insert_order(row.OrderID, ob.get_bbo_bid(), row.Volume, 'B', row.OrderTime)
-            elif row.OrderType == 11: # 市价委卖
+            elif order_type == 11: # 市价委卖
                 ob.insert_order(row.OrderID, row.LastPrice, row.Volume, 'S', row.OrderTime)       
-            elif row.OrderType == 12: # 限价委卖
+            elif order_type == 12: # 限价委卖
                 ob.insert_order(row.OrderID, row.Price, row.Volume, 'S', row.OrderTime)
-            elif row.OrderType == 13: # 本方最优委卖
+            elif order_type == 13: # 本方最优委卖
                 ob.insert_order(row.OrderID, ob.get_bbo_ask(), row.Volume, 'S', row.OrderTime)
         # ==========================================
         elif event_type == 'Deal':
-            if row.Side in [0, 1]:
+            side = row.Side
+            if side in [0, 1]:
                 # 交易所 L2 机制：一笔成交双边扣减                            
                 ob.execute_trade(ref_id=row.BuyID, exec_qty=row.Volume, exec_price=row.Price)
                 ob.execute_trade(ref_id=row.SellID, exec_qty=row.Volume, exec_price=row.Price)
@@ -393,9 +409,9 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
                     if local_total_cumvolume == curr_snapshot.TotalVolume:
                         curr_snapshot_timeout = row.DealTimeNext
 
-            elif row.Side == -1:  # 买单撤单
+            elif side == -1:  # 买单撤单
                 ob.cancel_order(ref_id=row.BuyID, cancel_qty=row.Volume)
-            elif row.Side == -11: # df
+            elif side == -11: # 卖单撤单
                 ob.cancel_order(ref_id=row.SellID, cancel_qty=row.Volume)
 
         if need_checksnapshot and curr_snapshot is not None:
@@ -445,42 +461,36 @@ def rebuild_and_verify_daily(args):
 
     trading_days = date_list
     for rday in trading_days:
-        order_file = base_path / f"order/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
-        deal_file = base_path / f"deal/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
-        snapshot_file = base_path / f"snapshot/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
+        with TimeProfile():
+            order_file = base_path / f"order/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
+            deal_file = base_path / f"deal/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
+            snapshot_file = base_path / f"snapshot/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
+            
+            if not order_file.exists() or not deal_file.exists() or not snapshot_file.exists():
+                print(f"⚠️ 找不到股票{stock_str}在{rday}对应的原始文件，自动跳过。")
+                continue
+
+            order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume']
+            orday_daily_pl = pl.read_parquet(order_file, columns=order_columns)  
+
+            deal_columns = ['Price', 'DealTime', 'Volume', 'Side', 'BuyID', 'DealID', 'SellID']
+            deal_daily_pl = pl.read_parquet(deal_file, columns=deal_columns)  
+            
+            snapshot_columns = ['DealNum', 'Price', 'TickTime', 'TotalAskVolume', 'TotalBidVolume', 'TotalDealNum', 'TotalTurnover', 'TotalVolume', 'Turnover', 'Volume', 'WeightAskPrice', 'WeightBidPrice']
+            for i in range(1,11):
+                snapshot_columns.extend([f'BidPrice{i}', f'BidVolume{i}', f'BidOrder{i}'])
+                snapshot_columns.extend([f'AskPrice{i}', f'AskVolume{i}', f'AskOrder{i}'])
         
-        if not order_file.exists() or not deal_file.exists() or not snapshot_file.exists():
-            print(f"⚠️ 找不到股票{stock_str}在{rday}对应的原始文件，自动跳过。")
-            continue
+            snapshot_daily_pl = pl.read_parquet(snapshot_file, columns=snapshot_columns)
 
-        order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume']
-        orday_daily_pl = pl.read_parquet(order_file, columns=order_columns)  
-
-        deal_columns = ['Price', 'DealTime', 'Volume', 'Side', 'BuyID', 'DealID', 'SellID']
-        deal_daily_pl = pl.read_parquet(deal_file, columns=deal_columns)  
-        
-        snapshot_columns = ['DealNum', 'Price', 'TickTime', 'TotalAskVolume', 'TotalBidVolume', 'TotalDealNum', 'TotalTurnover', 'TotalVolume', 'Turnover', 'Volume', 'WeightAskPrice', 'WeightBidPrice']
-        for i in range(1,11):
-            snapshot_columns.extend([f'BidPrice{i}', f'BidVolume{i}', f'BidOrder{i}'])
-            snapshot_columns.extend([f'AskPrice{i}', f'AskVolume{i}', f'AskOrder{i}'])
-    
-        snapshot_daily_pl = pl.read_parquet(snapshot_file, columns=snapshot_columns)
-
-        isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)  
-        if not isSucess:
-            msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | \n 错误信息: {msg}") 
-            isSucess_ret = False
+            isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)  
+            if not isSucess:
+                msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | \n 错误信息: {msg}") 
+                isSucess_ret = False
 
     return stock_str, isSucess_ret, msg_ret
 
 def rebuild_and_verify_monthly(args):
-    """
-    从磁盘流式读取并构建订单薄
-    :param order_file: 逐笔委托 parquet 文件路径
-    :param deal_file: 逐笔成交 parquet 文件路径
-    :param market: 市场标识，'SH' 代表沪市，'SZ' 代表深市
-    :param batch_size: 磁盘缓存块大小
-    """
     date_list, stock_str, checkyear, checkmonth, validate=args
     isSucess_ret = True
     msg_ret = []
@@ -507,12 +517,16 @@ def rebuild_and_verify_monthly(args):
    
     snapshot_monthly_pl = pl.read_parquet(snapshot_file, columns=snapshot_columns)
     
-    trading_days = order_monthly_pl["TradingDay"].unique().sort().to_list()
+    order_dict = order_monthly_pl.partition_by("TradingDay", as_dict=True)
+    deal_dict = deal_monthly_pl.partition_by("TradingDay", as_dict=True)
+    snapshot_dict = snapshot_monthly_pl.partition_by("TradingDay", as_dict=True)
+
+    trading_days = sorted(list(order_dict.keys()))
 
     for rday in trading_days:
-        orday_daily_pl = order_monthly_pl.filter(pl.col("TradingDay") == rday)
-        deal_daily_pl = deal_monthly_pl.filter(pl.col("TradingDay") == rday)
-        snapshot_daily_pl = snapshot_monthly_pl.filter(pl.col("TradingDay") == rday)
+        orday_daily_pl = order_dict[rday]
+        deal_daily_pl = deal_dict.get(rday, pl.DataFrame(schema=deal_monthly_pl.schema))
+        snapshot_daily_pl = snapshot_dict.get(rday, pl.DataFrame(schema=snapshot_monthly_pl.schema))
 
         isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)
         if not isSucess:
@@ -540,6 +554,7 @@ def Verify_level2(date_list=[], checkyear='', checkmonth='', validate=True, peri
         physical_cores = psutil.cpu_count(logical=False)
         subprocess = rebuild_and_verify_daily
     
+    stockstr_list = ['000001']
     for stock_str in stockstr_list:
         tasks.append((date_list, stock_str, checkyear, checkmonth, validate))
     
@@ -1042,10 +1057,10 @@ if __name__ == '__main__':
     # msg = generate_staging_order_and_deal_dateset(date_list=date_list, checkmonth='07', checkyear='2026')
     # if msg: logging.warning(msg)
     # generate_staging_snapshot_dateset(date_list=date_list, checkmonth='07', checkyear='2026')
-    # Verify_level2(date_list=date_list, checkmonth='07', checkyear='2026', period='daily', validate=True)    #每日更新
+    Verify_level2(date_list=date_list, checkmonth='07', checkyear='2026', period='daily', validate=True)    #每日更新
     
     # ------------ 月底存档任务 --------------------
     # generate_monthly_dateset(checkmonth='06', checkyear='2026')
-    Verify_level2(checkmonth='06', checkyear='2026', period='monthly', validate=True)   #月底存档文件检查
+    # Verify_level2(checkmonth='06', checkyear='2026', period='monthly', validate=True)   #月底存档文件检查
 
     
