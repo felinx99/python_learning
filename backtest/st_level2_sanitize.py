@@ -453,6 +453,7 @@ def rebuild_and_verify_daily(args):
     
     trading_days = date_list
     for rday in trading_days:
+    
         order_file = base_path / f"order/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
         deal_file = base_path / f"deal/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
         snapshot_file = base_path / f"snapshot/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
@@ -672,7 +673,7 @@ def presplit(date_list=[], checkmonth='', checkyear='2026'):
         print(f"⚡ 正在处理交易日{rday}全市场大文件")
         try:
             # 使用 Dataset API 流式读取并自动切分，规避将整个大表加载进内存
-            print("1.1.处理order文件中...")
+            print("1.1 处理order文件中...")
             ds.write_dataset(
                 order_scanner,
                 base_dir=tmp_order_split,
@@ -684,7 +685,7 @@ def presplit(date_list=[], checkmonth='', checkyear='2026'):
                 existing_data_behavior="overwrite_or_ignore"
             )
             print("order文件处理完成")
-            print("1.2.处理deal文件中...")
+            print("1.2 处理deal文件中...")
             ds.write_dataset(
                 deal_scanner,
                 base_dir=tmp_deal_split,
@@ -696,7 +697,7 @@ def presplit(date_list=[], checkmonth='', checkyear='2026'):
                 existing_data_behavior="overwrite_or_ignore"
             )
             print("deal文件处理完成")
-            print("1.3.处理snapshot文件中...")
+            print("1.3 处理snapshot文件中...")
             ds.write_dataset(
                 snapshot_scanner,
                 base_dir=tmp_snapshot_split,
@@ -708,7 +709,7 @@ def presplit(date_list=[], checkmonth='', checkyear='2026'):
                 existing_data_behavior="overwrite_or_ignore"
             )
             print("snapshot文件处理完成")
-            print("1.4.处理order_raw文件中...")
+            print("1.4 处理order_raw文件中...")
             ds.write_dataset(
                 order_raw_scanner,
                 base_dir=tmp_order_raw_split,
@@ -753,7 +754,7 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
     msg_chunks = []
 
     for rday in date_list:
-        print(f"⏱️ 正在处理交易日(Order/Deal): {rday} ...")          
+        print(f"⏱️ 正在处理交易日{rday}的 Order/Deal 数据...")          
         try:
             # 3.1 读取每日全市场大文件（全天只读一次）
             stockcode_list = [d.name for d in stage_order_root.iterdir() if d.is_dir()]
@@ -841,7 +842,7 @@ def generate_staging_snapshot_dateset(date_list=[], checkyear='2026', checkmonth
     stage_order_root = dst_dir_order_raw /'tmp_split' 
 
     for rday in date_list:
-        print(f"⏱️ 正在处理交易日(Snapshot/Order_raw): {rday} ...")            
+        print(f"⏱️ 正在处理交易日{rday}的 Snapshot/Order_raw 数据 ...")            
         try:
             # 提取全市场去重股票代码列表 (int 类型)
             stockcode_list = [d.name for d in stage_order_root.iterdir() if d.is_dir()]
@@ -994,8 +995,9 @@ if __name__ == '__main__':
     #     20260629, 20260630
     # ] 
     date_list = [
-        20260701, 20260702, 20260703,         
-        # 20260705, 20260707, 20260708, 20260709, 20260710,
+        # 20260701, 20260702, 20260703,         
+        20260706, 
+        # 20260707, 20260708, 20260709, 20260710,
         # 20260713, 20260714, 20260715, 20260716, 20260717,
         # 20260720, 20260721, 20260722, 20260723, 20260724,
         # 20260727, 20260728, 20260729, 20260730, 20260721
