@@ -17,40 +17,50 @@ class DealStatus:
 
 class OrderNode:
     """订单节点：存储单个订单的明细，双向链表节点"""
-    __slots__ = ('ref_id', 'price', 'qty', 'side', 'is_active', 'price_list')
+    __slots__ = ('ref_id', 'price', 'qty', 'side', 'next', 'prev', 'price_list')
     def __init__(self, ref_id, price, qty, side):
         self.ref_id = ref_id        
         self.price = price
         self.qty = qty              
         self.side = side
-        self.is_active = True            
+        self.next = None
+        self.prev = None
         self.price_list = None
 
 class PriceLevelList:
     """价格级队列：维护相同价格下订单的双向链表，保证时间优先 (FIFO)"""
-    __slots__ = ('price', 'orders', 'total_volume', 'order_count')
+    __slots__ = ('price', 'head', 'tail', 'total_volume', 'order_count')
     def __init__(self, price):
         self.price = price
-        self.orders = []
+        self.head = None
+        self.tail = None
         self.total_volume = 0   # 该档位总挂单量,通过接口维护，不可直接操作      
         self.order_count = 0    # 该档位总订单数,通过接口维护，不可直接操作       
 
     def append(self, node):
         """O(1) 尾部插入新订单"""
-        self.orders.append(node)
+        if not self.head:
+            self.head = node
+            self.tail = node
+        else:
+            self.tail.next = node
+            node.prev = self.tail
+            self.tail = node
         self.total_volume += node.qty
         self.order_count += 1
 
     def remove(self, node):
         """O(1) 任意位置断开指针移除订单"""
-        self.orders.remove(node)
+        if node.prev:
+            node.prev.next = node.next
+        else:
+            self.head = node.next
+        if node.next:
+            node.next.prev = node.prev
+        else:
+            self.tail = node.prev
         self.total_volume -= node.qty
         self.order_count -= 1
-
-    def lazyremove(self, node):
-        node.is_active = False  # 标记墓碑
-        self.order_count -= 1
-        self.total_volume -= node.qty
 
     def reduce(self, node, cancel_qty):
         """O(1) 部分撤单（减仓）"""
@@ -58,14 +68,10 @@ class PriceLevelList:
         self.total_volume -= cancel_qty
 
     def clear(self):
-        self.orders.clear()
+        self.head = None
+        self.tail = None
         self.total_volume = 0
         self.order_count = 0
-        
-    @property
-    def active_nodes(self):
-        """🎯 外部接口：动态过滤并返回当前档位下真正存活的明细节点列表"""
-        return [node for node in self.nodes if node.is_active]
 
 class OrderBook:
     """基于 Method 3 专门对接 L2 逐笔数据的订单薄状态机"""
@@ -118,7 +124,7 @@ class OrderBook:
 
             if cancel_qty is None or cancel_qty >= node.qty:
                 actual_cancel_qty = node.qty
-                price_list.lazyremove(node)
+                price_list.remove(node)
                 if price_list.order_count == 0:
                     if side == 'B':
                         del self.bids[price]
@@ -156,7 +162,7 @@ class OrderBook:
             actual_exec_qty = node.qty if exec_qty >= node.qty else exec_qty
 
             if exec_qty >= node.qty:
-                price_list.lazyremove(node)
+                price_list.remove(node)
                 if price_list.order_count == 0:
                     if side == 'B':
                         del self.bids[price]
