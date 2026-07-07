@@ -1,5 +1,3 @@
-from sortedcontainers import SortedDict
-
 
 class DealStatus:
     # 💡 优化 1：使用 __slots__ 彻底消灭每个实例的 __dict__ 字典，内存暴减 70%，实例化加速数倍
@@ -19,50 +17,40 @@ class DealStatus:
 
 class OrderNode:
     """订单节点：存储单个订单的明细，双向链表节点"""
-    __slots__ = ('ref_id', 'price', 'qty', 'side', 'next', 'prev', 'price_list')
+    __slots__ = ('ref_id', 'price', 'qty', 'side', 'is_active', 'price_list')
     def __init__(self, ref_id, price, qty, side):
         self.ref_id = ref_id        
         self.price = price
         self.qty = qty              
-        self.side = side            
-        self.next = None
-        self.prev = None
+        self.side = side
+        self.is_active = True            
         self.price_list = None
 
 class PriceLevelList:
     """价格级队列：维护相同价格下订单的双向链表，保证时间优先 (FIFO)"""
-    __slots__ = ('price', 'head', 'tail', 'total_volume', 'order_count')
+    __slots__ = ('price', 'orders', 'total_volume', 'order_count')
     def __init__(self, price):
         self.price = price
-        self.head = None
-        self.tail = None
+        self.orders = []
         self.total_volume = 0   # 该档位总挂单量,通过接口维护，不可直接操作      
         self.order_count = 0    # 该档位总订单数,通过接口维护，不可直接操作       
 
     def append(self, node):
         """O(1) 尾部插入新订单"""
-        if not self.head:
-            self.head = node
-            self.tail = node
-        else:
-            self.tail.next = node
-            node.prev = self.tail
-            self.tail = node
+        self.orders.append(node)
         self.total_volume += node.qty
         self.order_count += 1
 
     def remove(self, node):
         """O(1) 任意位置断开指针移除订单"""
-        if node.prev:
-            node.prev.next = node.next
-        else:
-            self.head = node.next
-        if node.next:
-            node.next.prev = node.prev
-        else:
-            self.tail = node.prev
+        self.orders.remove(node)
         self.total_volume -= node.qty
         self.order_count -= 1
+
+    def lazyremove(self, node):
+        node.is_active = False  # 标记墓碑
+        self.order_count -= 1
+        self.total_volume -= node.qty
 
     def reduce(self, node, cancel_qty):
         """O(1) 部分撤单（减仓）"""
@@ -70,16 +58,20 @@ class PriceLevelList:
         self.total_volume -= cancel_qty
 
     def clear(self):
-        self.head = None
-        self.tail = None
+        self.orders.clear()
         self.total_volume = 0
         self.order_count = 0
+        
+    @property
+    def active_nodes(self):
+        """🎯 外部接口：动态过滤并返回当前档位下真正存活的明细节点列表"""
+        return [node for node in self.nodes if node.is_active]
 
 class OrderBook:
     """基于 Method 3 专门对接 L2 逐笔数据的订单薄状态机"""
     def __init__(self):
-        self.bids = SortedDict()    
-        self.asks = SortedDict()                
+        self.bids = {}    
+        self.asks = {}                
         self.ref_id_map = {}                    
         self.deals = DealStatus() 
 
@@ -96,7 +88,6 @@ class OrderBook:
         node = OrderNode(ref_id, price, qty, side)
         self.ref_id_map[ref_id] = node
         
-        # 💡 优化 5：增量累加总委托统计
         if side == 'B':
             self.total_bid_vol += qty
             self.bid_sum_pv += price * qty
@@ -127,7 +118,7 @@ class OrderBook:
 
             if cancel_qty is None or cancel_qty >= node.qty:
                 actual_cancel_qty = node.qty
-                price_list.remove(node)
+                price_list.lazyremove(node)
                 if price_list.order_count == 0:
                     if side == 'B':
                         del self.bids[price]
@@ -165,7 +156,7 @@ class OrderBook:
             actual_exec_qty = node.qty if exec_qty >= node.qty else exec_qty
 
             if exec_qty >= node.qty:
-                price_list.remove(node)
+                price_list.lazyremove(node)
                 if price_list.order_count == 0:
                     if side == 'B':
                         del self.bids[price]
@@ -188,14 +179,15 @@ class OrderBook:
     def get_topN_snapshot(self, side, n_levels=5):
         """获取当前五档盘口"""
         if side == 'B':
+            if not self.bids: return []
+            # 买方：价格从大到小排，取前 N 档
+            sorted_prices = sorted(self.bids.keys(), reverse=True)[:n_levels]
             book = self.bids
-            keys = book.keys()
-            n = len(keys)
-            if n == 0: return []
-            sorted_prices = keys[max(0, n - n_levels):][::-1]
         else:
+            if not self.asks: return []
+            # 卖方：价格从小到大排，取前 N 档
+            sorted_prices = sorted(self.asks.keys())[:n_levels]
             book = self.asks
-            sorted_prices = book.keys()[:n_levels]
             
         return [(p, book[p].total_volume, book[p].order_count) for p in sorted_prices]
 
@@ -207,54 +199,8 @@ class OrderBook:
     def get_deal_status(self):
         return self.deals.get()
 
-
-    def calibrate_level(self, side, price, true_vol, true_count):
-        """快照对账与基础裁剪"""
-        book = self.bids if side == 'B' else self.asks
-    
-        if price not in book and true_vol <= 0:
-            return
-
-        if price in book:
-            p_list = book[price]
-            # 💡 修正增量指标
-            if side == 'B':
-                self.total_bid_vol -= p_list.total_volume
-                self.bid_sum_pv -= price * p_list.total_volume
-            else:
-                self.total_ask_vol -= p_list.total_volume
-                self.ask_sum_pv -= price * p_list.total_volume
-
-            curr = p_list.head
-            while curr:
-                if curr.ref_id in self.ref_id_map:
-                    del self.ref_id_map[curr.ref_id]
-                curr = curr.next
-            p_list.clear()
-        else:
-            p_list = PriceLevelList(price)
-            book[price] = p_list
-
-        if true_vol > 0:
-            syn_id = f"syn_{side}_{int(price)}"
-            syn_node = OrderNode(syn_id, price, true_vol, side)
-            self.ref_id_map[syn_id] = syn_node
-            p_list.head = syn_node
-            p_list.tail = syn_node
-            p_list.total_volume = true_vol
-            p_list.order_count = true_count
-
-            if side == 'B':
-                self.total_bid_vol += true_vol
-                self.bid_sum_pv += price * true_vol
-            else:
-                self.total_ask_vol += true_vol
-                self.ask_sum_pv += price * true_vol
-        else:
-            del book[price]
-
     def get_bbo_bid(self):
-        return self.bids.peekitem(-1)[0] if self.bids else 0
+        return max(self.bids.keys()) if self.bids else 0
 
     def get_bbo_ask(self):        
-        return self.asks.peekitem(0)[0] if self.asks else 0
+        return min(self.asks.keys()) if self.asks else 0
