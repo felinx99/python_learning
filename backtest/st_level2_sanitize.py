@@ -16,6 +16,7 @@ from enum import IntEnum
 from multiprocessing import Pool
 from api.timeprofile import TimeProfile
 from .util.order import OrderBook
+from line_profiler import LineProfiler
 
 
 # --- 配置区 ---
@@ -85,6 +86,23 @@ LABEL_MAP = {
     TimeFrame.Months: "mon",
     TimeFrame.Years: "y"
 }
+
+class PreparsedSnapshot:
+    __slots__ = ('TickTime', 'TotalVolume', 'TotalBidVolume', 'TotalAskVolume', 
+                 'WeightBidPrice', 'WeightAskPrice', 'TotalTurnover', 'Turnover', 
+                 'snap_bids', 'snap_asks')
+    def __init__(self, row):
+        self.TickTime = row.TickTime
+        self.TotalVolume = row.TotalVolume
+        self.TotalBidVolume = row.TotalBidVolume
+        self.TotalAskVolume = row.TotalAskVolume
+        self.WeightBidPrice = row.WeightBidPrice
+        self.WeightAskPrice = row.WeightAskPrice
+        self.TotalTurnover = row.TotalTurnover
+        self.Turnover = row.Turnover
+        # 在外部一次性提取完十档
+        self.snap_bids = [(getattr(row, f'BidPrice{i}'), getattr(row, f'BidVolume{i}'), getattr(row, f'BidOrder{i}')) for i in range(1, 11)]
+        self.snap_asks = [(getattr(row, f'AskPrice{i}'), getattr(row, f'AskVolume{i}'), getattr(row, f'AskOrder{i}')) for i in range(1, 11)]
 
 def parse_deal_time(date_str, time_series):
     """
@@ -312,7 +330,13 @@ def stream_l2_timeline(order_pl, deal_pl):
         curr_deal = next(deal_stream, None)
 
 def check_10_levels(ob=None, snapshot=None, decimals=0):
-    total_dealnum, total_dealvolume, total_turnover = ob.get_deal_status()
+    _, total_dealvolume, total_turnover = ob.get_deal_status()
+    tick_time = snapshot.TickTime
+    if tick_time<92500000 or (145700000<=tick_time<150000000):
+        return total_dealvolume == snapshot.TotalVolume and total_turnover == snapshot.TotalTurnover
+    
+    if snapshot.snap_bids[4][0]==0 and snapshot.snap_asks[4][0]==0:
+        return total_dealvolume == snapshot.TotalVolume and total_turnover == snapshot.TotalTurnover
 
     my_tot_bid_vol, my_tot_ask_vol, my_w_bid_p, my_w_ask_p = ob.get_orderbook_stats()
     my_w_bid_p = round(my_w_bid_p*10)
@@ -321,127 +345,232 @@ def check_10_levels(ob=None, snapshot=None, decimals=0):
     # 对于整数价格：标准整数，实际为小数，最大相差0.5。放大10倍后应该用6做容差
     # 对于小数价格：一般相差0.1，原来用0.2做容差。放大10倍后应该用2做容差
     price_tolerance = 6 if decimals == 0 else 2
-    
-    if (snapshot.TickTime>=92500000 and snapshot.TickTime<145700000 or snapshot.TickTime>=150000000) and (getattr(snapshot, 'BidPrice5', 0)!=0 or getattr(snapshot, 'AskPrice5', 0)!=0):
-        #is_opencallending = True
-        match_all = my_tot_bid_vol == snapshot.TotalBidVolume and my_tot_ask_vol == snapshot.TotalAskVolume and \
-                total_dealvolume == snapshot.TotalVolume and total_turnover == snapshot.TotalTurnover and \
-                (abs(my_w_bid_p - snapshot.WeightBidPrice) < price_tolerance and abs(my_w_ask_p - snapshot.WeightAskPrice) < price_tolerance)
-        if match_all:
-            # --- 门限值配置 ---
-            VOL_THRESHOLD = 20  # 允许十档委托量的绝对值偏差
+   
 
-            # 1. 提取本地数据与快照数据 (直接使用原始 List[Tuple])
-            my_bids = ob.get_topN_snapshot('B', n_levels=10)
-            my_asks = ob.get_topN_snapshot('S', n_levels=10)
+    if my_tot_bid_vol == snapshot.TotalBidVolume and \
+        my_tot_ask_vol == snapshot.TotalAskVolume and \
+        total_dealvolume == snapshot.TotalVolume and \
+        total_turnover == snapshot.TotalTurnover and \
+        abs(my_w_bid_p - snapshot.WeightBidPrice) < price_tolerance and \
+        abs(my_w_ask_p - snapshot.WeightAskPrice) < price_tolerance:
 
-            cached_snap_bids = [(getattr(snapshot, f'BidPrice{i}'), int(getattr(snapshot, f'BidVolume{i}')), int(getattr(snapshot, f'BidOrder{i}'))) for i in range(1, 11) if getattr(snapshot, f'BidPrice{i}') > 0]
-            cached_snap_asks = [(getattr(snapshot, f'AskPrice{i}'), int(getattr(snapshot, f'AskVolume{i}')), int(getattr(snapshot, f'AskOrder{i}'))) for i in range(1, 11) if getattr(snapshot, f'AskPrice{i}') > 0]
+        VOL_THRESHOLD = 20  # 允许十档委托量的绝对值偏差
 
-            def check_side_alignment(my_levels, snap_levels, vol_thresh):
-                for (p1, v1, c1), (p2, v2, c2) in zip(my_levels, snap_levels):
-                    # 价格(p)和总单数(c)必须绝对精确对齐；量(v)允许误差
-                    if p1 != p2 or c1 != c2 or abs(v1 - v2) > vol_thresh:
-                        return False -1
-                return True
+        # 1. 提取本地数据与快照数据 (直接使用原始 List[Tuple])
+        my_bids = ob.get_topN_snapshot('B', n_levels=10)
+        my_asks = ob.get_topN_snapshot('S', n_levels=10)
 
-            match_levels = check_side_alignment(my_bids, cached_snap_bids, VOL_THRESHOLD) and \
-                           check_side_alignment(my_asks, cached_snap_asks, VOL_THRESHOLD)
+        cached_snap_bids = snapshot.snap_bids
+        cached_snap_asks = snapshot.snap_asks
 
-            if match_levels:
-                return True, 0
+        def check_side_alignment(my_levels, snap_levels, vol_thresh):
+            for (p1, v1, c1), (p2, v2, c2) in zip(my_levels, snap_levels):
+                # 价格(p)和总单数(c)必须绝对精确对齐；量(v)允许误差
+                if p1 != p2 or c1 != c2 or abs(v1 - v2) > vol_thresh:
+                    return False
+            return True
 
+        match_levels = check_side_alignment(my_bids, cached_snap_bids, VOL_THRESHOLD) and \
+                        check_side_alignment(my_asks, cached_snap_asks, VOL_THRESHOLD)
 
-    else:
-        #集合竞价阶段，无十档数据无交易
-        #is_opencallending = False
-        match_all = total_dealvolume == snapshot.TotalVolume and total_turnover == snapshot.TotalTurnover
-        if match_all:
-            return True, 0
-    
-    return False, -2
+        if match_levels:
+            return True
+
+    return False
 
 def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_daily_pl=None, need_checksnapshot = True):
     isSucess = True
     msg = ''
     ob = OrderBook() 
+    if orday_daily_pl is None or len(orday_daily_pl) == 0:
+        return isSucess, msg
 
-    if need_checksnapshot:
-        snapshot_stream = stream_from_snapshot(snapshot_daily_pl)
-        curr_snapshot, target_decimals, curr_snapshot_timeout = next(snapshot_stream, (None,None,180000000))
-        while curr_snapshot.TotalBidVolume==0 and curr_snapshot.TotalAskVolume==0:
-            curr_snapshot, target_decimals, curr_snapshot_timeout = next(snapshot_stream, (None,None,180000000))
-        local_total_cumvolume = 0           #累积交易量，用于快速比较是否需要进行snapshot检验，不符的肯定不用检验
+    # =================================================================
+    # 1. 向量化构建统一事件流 (Polars 极致加速)
+    # =================================================================
+    # 动态确定订单排序主键
+    if len(orday_daily_pl) > 10 and orday_daily_pl["BizIndex"][10] > 0 and orday_daily_pl["BizIndex"][10] != orday_daily_pl["OrderID"][10]:
+        orday_daily_pl = orday_daily_pl.with_columns(pl.col("BizIndex").cast(pl.Int64).alias("Seq"))
+    else:
+        orday_daily_pl = orday_daily_pl.with_columns(pl.col("OrderID").cast(pl.Int64).alias("Seq"))
+
+    ord_events = orday_daily_pl.select([
+        pl.col("OrderTime").cast(pl.Int32).alias("Time"),
+        pl.col("Seq"),
+        pl.lit(0).cast(pl.Int8).alias("TypePriority"),  # 0 代表订单优先
+        pl.col("OrderType").cast(pl.Int8),
+        pl.col("Price").cast(pl.Int32),
+        pl.col("Volume").cast(pl.Int64),
+        pl.col("LastPrice").cast(pl.Int32),
+        pl.lit(0).cast(pl.Int8).alias("Side"),
+        pl.lit(0).cast(pl.Int64).alias("BuyID"),
+        pl.lit(0).cast(pl.Int64).alias("SellID"),
+        pl.col("OrderID").cast(pl.Int64),
+        pl.lit(0).cast(pl.Int64).alias("DealID"),
+        pl.lit(0).cast(pl.Int32).alias("DealTimeNext"),
+    ])
+
+    if deal_daily_pl is not None and len(deal_daily_pl) > 0:
+        CLOSE_TIME = 153000000  
+        # 预先在 Polars 内部通过下移一位向量化计算 DealTimeNext
+        deal_daily_pl = deal_daily_pl.sort(["DealTime", "DealID"]).with_columns([
+            pl.when(~pl.col("Side").is_in([-1, -11]))
+            .then(pl.col("DealTime"))
+            .otherwise(None)
+            .shift(-1)                                
+            .fill_null(strategy="backward")          
+            .fill_null(CLOSE_TIME)                    
+            .cast(pl.Int32)
+            .alias("DealTimeNext")
+        ])
+
+        # 抽取 Deal 关键列并对齐 Schema
+        deal_events = deal_daily_pl.select([
+            pl.col("DealTime").cast(pl.Int32).alias("Time"),
+            pl.col("DealID").cast(pl.Int64).alias("Seq"),
+            pl.lit(1).cast(pl.Int8).alias("TypePriority"), # 1 代表成交靠后
+            pl.lit(0).cast(pl.Int8).alias("OrderType"), 
+            pl.col("Price").cast(pl.Int32),
+            pl.col("Volume").cast(pl.Int64),
+            pl.lit(0).cast(pl.Int32).alias("LastPrice"), 
+            pl.col("Side").cast(pl.Int8),
+            pl.col("BuyID").cast(pl.Int64),
+            pl.col("SellID").cast(pl.Int64),
+            pl.lit(0).cast(pl.Int64).alias("OrderID"), 
+            pl.col("DealID").cast(pl.Int64),
+            pl.col("DealTimeNext").cast(pl.Int32),
+        ])
+        # 矩阵合并
+        events_pl = pl.concat([ord_events, deal_events])
+    else:
+        events_pl = ord_events
+
+    # 利用 Polars 内置的 Rust 并行多键排序，干掉复杂的 Python 双指针 while 循环
+    events_pl = events_pl.sort(["Time", "Seq", "TypePriority"])
+    
+    # 转换为 Pandas DataFrame 以享用高速内置 C 级别迭代器
+    events_df = events_pl.to_pandas()
+    
+    # 严格及时释放内存，确保在多进程内存受限下的安全
+    del ord_events, events_pl
+    if deal_daily_pl is not None:
+        del deal_events
+
+    # =================================================================
+    # 2. 快照流数组化与索引化控制 (移除 Generator 减低函数调用开销)
+    # =================================================================
+    snapshots = []
+    snap_idx = 0
+    num_snapshots = 0
+    curr_snapshot = None
+    target_decimals = 0
+    curr_snapshot_timeout = 180000000
+    local_total_cumvolume = 0
+
+    if need_checksnapshot and snapshot_daily_pl is not None and len(snapshot_daily_pl) > 0:
+        df_snap_pl = (
+            snapshot_daily_pl
+            .sort("TickTime")
+            .with_columns([
+                (pl.col("Turnover") * 100).round(0).cast(pl.Int64),
+                (pl.col("TotalTurnover") * 100).round(0).cast(pl.Int64),
+                (pl.col("WeightBidPrice") * 10).round(0).cast(pl.Int32),
+                (pl.col("WeightAskPrice") * 10).round(0).cast(pl.Int32),
+            ])
+        )
+        # 将快照保存为 NamedTuple 组成的内存 List，开销极小
+        snapshots = [PreparsedSnapshot(r) for r in df_snap_pl.to_pandas().itertuples(index=False)]
+        num_snapshots = len(snapshots)
         
-    # 直接消费磁盘流，内存开销恒定
-    for event_type, event_time, row in stream_l2_timeline(orday_daily_pl, deal_daily_pl):  
-        if event_type == 'Order':
-            order_type = row.OrderType
-            if order_type == 0:    # 委买
-                ob.insert_order(row.OrderID, row.Price, row.Volume, 'B', row.OrderTime)
-            elif order_type == 10: # 委卖
-                ob.insert_order(row.OrderID, row.Price, row.Volume, 'S', row.OrderTime)
-            # elif row.OrderType in (-1, -11): # 撤买/撤卖,竞价阶段的撤销无deal记录，不能删除
-            #     ob.cancel_order(row.OrderID, row.Volume)
+        # 寻找首个有效交易快照
+        while snap_idx < num_snapshots and snapshots[snap_idx].TotalBidVolume == 0 and snapshots[snap_idx].TotalAskVolume == 0:
+            snap_idx += 1
+            
+        if snap_idx < num_snapshots:
+            curr_snapshot = snapshots[snap_idx]
+            target_decimals = 0 if curr_snapshot.WeightBidPrice % 10 == 0 else 1
+            curr_snapshot_timeout = curr_snapshot.TickTime + 2000
 
-            elif order_type == 1: #市价委买
-                ob.insert_order(row.OrderID, row.LastPrice, row.Volume, 'B', row.OrderTime)                
-            elif order_type == 2:    # 限价委买
-                ob.insert_order(row.OrderID, row.Price, row.Volume, 'B', row.OrderTime)
-            elif order_type == 3: #本方最优委买
-                ob.insert_order(row.OrderID, ob.get_bbo_bid(), row.Volume, 'B', row.OrderTime)
-            elif order_type == 11: # 市价委卖
-                ob.insert_order(row.OrderID, row.LastPrice, row.Volume, 'S', row.OrderTime)       
-            elif order_type == 12: # 限价委卖
-                ob.insert_order(row.OrderID, row.Price, row.Volume, 'S', row.OrderTime)
-            elif order_type == 13: # 本方最优委卖
-                ob.insert_order(row.OrderID, ob.get_bbo_ask(), row.Volume, 'S', row.OrderTime)
-        # ==========================================
-        elif event_type == 'Deal':
-            side = row.Side
-            if side in [0, 1]:
-                # 交易所 L2 机制：一笔成交双边扣减                            
-                ob.execute_trade(ref_id=row.BuyID, exec_qty=row.Volume, exec_price=row.Price)
-                ob.execute_trade(ref_id=row.SellID, exec_qty=row.Volume, exec_price=row.Price)
+    # =================================================================
+    # 3. 紧凑状态机循环 (itertuples(name=None) 位置解包速度拉满)
+    # =================================================================
+    insert_order = ob.insert_order
+    execute_trade = ob.execute_trade
+    cancel_order = ob.cancel_order
+    get_bbo_bid = ob.get_bbo_bid
+    get_bbo_ask = ob.get_bbo_ask
 
-                if need_checksnapshot:
-                    local_total_cumvolume += row.Volume
+    for Time, Seq, TypePriority, OrderType, Price, Volume, LastPrice, Side, BuyID, SellID, OrderID, DealID, DealTimeNext in events_df.itertuples(index=False, name=None): 
+        if TypePriority == 0:  # 执行订单流逻辑
+            if OrderType == 0:     # 委买
+                insert_order(OrderID, Price, Volume, 'B')
+            elif OrderType == 10:  # 委卖
+                insert_order(OrderID, Price, Volume, 'S')
+            elif OrderType == 1:   # 市价委买
+                insert_order(OrderID, LastPrice, Volume, 'B')                
+            elif OrderType == 2:   # 限价委买
+                insert_order(OrderID, Price, Volume, 'B')
+            elif OrderType == 3:   # 本方最优委买
+                insert_order(OrderID, get_bbo_bid(), Volume, 'B')
+            elif OrderType == 11:  # 市价委卖
+                insert_order(OrderID, LastPrice, Volume, 'S')       
+            elif OrderType == 12:  # 限价委卖
+                insert_order(OrderID, Price, Volume, 'S')
+            elif OrderType == 13:  # 本方最优委卖
+                insert_order(OrderID, get_bbo_ask(), Volume, 'S')
+                
+        else:  # 执行成交流逻辑
+            if Side in (0, 1):
+                execute_trade(ref_id=BuyID, exec_qty=Volume, exec_price=Price)
+                execute_trade(ref_id=SellID, exec_qty=Volume, exec_price=Price)
+
+                if need_checksnapshot and curr_snapshot is not None:
+                    local_total_cumvolume += Volume
                     if local_total_cumvolume == curr_snapshot.TotalVolume:
-                        curr_snapshot_timeout = row.DealTimeNext
+                        curr_snapshot_timeout = DealTimeNext
 
-            elif side == -1:  # 买单撤单
-                ob.cancel_order(ref_id=row.BuyID, cancel_qty=row.Volume)
-            elif side == -11: # 卖单撤单
-                ob.cancel_order(ref_id=row.SellID, cancel_qty=row.Volume)
+            elif Side == -1:    # 买单撤单
+                cancel_order(ref_id=BuyID, cancel_qty=Volume)
+            elif Side == -11:   # 卖单撤单
+                cancel_order(ref_id=SellID, cancel_qty=Volume)
 
+        # 快照核验与对齐触发
         if need_checksnapshot and curr_snapshot is not None:
-            # 1. 判断snapshot是否与当前ob是否相同。
-            # 2. 不相同: 则读入下一个order/deal数据
-            # 3. 相同: 读入下一个snapshot,判断与当前ob是否相同，相同继续读入下一个snapshot，直到不相同。
-            if event_time >= 93035010:
-                pass
             if local_total_cumvolume == curr_snapshot.TotalVolume:
-                verified, _ = check_10_levels(ob=ob, snapshot=curr_snapshot, decimals=target_decimals)
+                verified = check_10_levels(ob=ob, snapshot=curr_snapshot, decimals=target_decimals)
                 while verified:
-                    curr_snapshot, target_decimals, curr_snapshot_timeout = next(snapshot_stream, (None,None,180000000))
-                    if  curr_snapshot != None and local_total_cumvolume == curr_snapshot.TotalVolume:
-                        verified, _ = check_10_levels(ob=ob, snapshot=curr_snapshot, decimals=target_decimals)
+                    snap_idx += 1
+                    if snap_idx < num_snapshots:
+                        curr_snapshot = snapshots[snap_idx]
+                        target_decimals = 0 if curr_snapshot.WeightBidPrice % 10 == 0 else 1
+                        curr_snapshot_timeout = curr_snapshot.TickTime + 2000
+                        if local_total_cumvolume == curr_snapshot.TotalVolume:
+                            verified = check_10_levels(ob=ob, snapshot=curr_snapshot, decimals=target_decimals)
+                        else:
+                            verified = False
                     else:
-                        verified = False    #此分支不能删除，在while循环多次后需要退出
+                        curr_snapshot = None
+                        verified = False
             else:
-                if event_time >= curr_snapshot_timeout:
+                if Time >= curr_snapshot_timeout:
                     if isSucess:
-                        msg = f"⚡ [snapshot:{curr_snapshot.TickTime}|{event_type}:{event_time}] snapshot检验超时 \n"
+                        msg = f"⚡ [snapshot:{curr_snapshot.TickTime}|{'Order' if TypePriority==0 else 'Deal'}:{Time}] snapshot检验超时 \n"
                     isSucess = False
                     verified = True
                     while verified:
-                        curr_snapshot, target_decimals, curr_snapshot_timeout = next(snapshot_stream, (None,None,180000000))
-                        if curr_snapshot != None and local_total_cumvolume == curr_snapshot.TotalVolume:
-                            verified, _ = check_10_levels(ob=ob, snapshot=curr_snapshot, decimals=target_decimals)
-                        else:   
-                            verified = False    #此分支不能删除，在while循环多次后需要退出
+                        snap_idx += 1
+                        if snap_idx < num_snapshots:
+                            curr_snapshot = snapshots[snap_idx]
+                            target_decimals = 0 if curr_snapshot.WeightBidPrice % 10 == 0 else 1
+                            curr_snapshot_timeout = curr_snapshot.TickTime + 2000
+                            if local_total_cumvolume == curr_snapshot.TotalVolume:
+                                verified = check_10_levels(ob=ob, snapshot=curr_snapshot, decimals=target_decimals)
+                            else:
+                                verified = False
+                        else:
+                            curr_snapshot = None
+                            verified = False
 
-    # msg = "".join(msg_chunks)     
     return isSucess, msg
 
 def rebuild_and_verify_daily(args):
@@ -458,35 +587,37 @@ def rebuild_and_verify_daily(args):
 
     base_path = CONFIG.base_path['LEVEL2_BUFFER_PATH'] / 'monthlystaging'
     # 初始化上一轮构建好的 Level2OrderBook 实例 (Method 3 架构)
-
+    
     trading_days = date_list
     for rday in trading_days:
-        with TimeProfile():
-            order_file = base_path / f"order/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
-            deal_file = base_path / f"deal/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
-            snapshot_file = base_path / f"snapshot/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
-            
-            if not order_file.exists() or not deal_file.exists() or not snapshot_file.exists():
-                print(f"⚠️ 找不到股票{stock_str}在{rday}对应的原始文件，自动跳过。")
-                continue
-
-            order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume']
-            orday_daily_pl = pl.read_parquet(order_file, columns=order_columns)  
-
-            deal_columns = ['Price', 'DealTime', 'Volume', 'Side', 'BuyID', 'DealID', 'SellID']
-            deal_daily_pl = pl.read_parquet(deal_file, columns=deal_columns)  
-            
-            snapshot_columns = ['DealNum', 'Price', 'TickTime', 'TotalAskVolume', 'TotalBidVolume', 'TotalDealNum', 'TotalTurnover', 'TotalVolume', 'Turnover', 'Volume', 'WeightAskPrice', 'WeightBidPrice']
-            for i in range(1,11):
-                snapshot_columns.extend([f'BidPrice{i}', f'BidVolume{i}', f'BidOrder{i}'])
-                snapshot_columns.extend([f'AskPrice{i}', f'AskVolume{i}', f'AskOrder{i}'])
+        order_file = base_path / f"order/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
+        deal_file = base_path / f"deal/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
+        snapshot_file = base_path / f"snapshot/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
         
-            snapshot_daily_pl = pl.read_parquet(snapshot_file, columns=snapshot_columns)
+        if not order_file.exists() or not deal_file.exists() or not snapshot_file.exists():
+            print(f"⚠️ 找不到股票{stock_str}在{rday}对应的原始文件，自动跳过。")
+            continue
 
-            isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)  
-            if not isSucess:
-                msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | \n 错误信息: {msg}") 
-                isSucess_ret = False
+        order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume']
+        orday_daily_pl = pl.read_parquet(order_file, columns=order_columns)  
+
+        deal_columns = ['Price', 'DealTime', 'Volume', 'Side', 'BuyID', 'DealID', 'SellID']
+        deal_daily_pl = pl.read_parquet(deal_file, columns=deal_columns)  
+        
+        snapshot_columns = ['DealNum', 'Price', 'TickTime', 'TotalAskVolume', 'TotalBidVolume', 'TotalDealNum', 'TotalTurnover', 'TotalVolume', 'Turnover', 'Volume', 'WeightAskPrice', 'WeightBidPrice']
+        for i in range(1,11):
+            snapshot_columns.extend([f'BidPrice{i}', f'BidVolume{i}', f'BidOrder{i}'])
+            snapshot_columns.extend([f'AskPrice{i}', f'AskVolume{i}', f'AskOrder{i}'])
+    
+        snapshot_daily_pl = pl.read_parquet(snapshot_file, columns=snapshot_columns)
+
+        isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)  
+        if not isSucess:
+            msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | \n 错误信息: {msg}") 
+            isSucess_ret = False
+        # 清理单日内存占用
+        del orday_daily_pl, deal_daily_pl, snapshot_daily_pl
+        gc.collect()
 
     return stock_str, isSucess_ret, msg_ret
 
@@ -532,6 +663,8 @@ def rebuild_and_verify_monthly(args):
         if not isSucess:
             msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | \n 错误信息: {msg}") 
             isSucess_ret = False
+        del orday_daily_pl, deal_daily_pl, snapshot_daily_pl
+        gc.collect()
 
     return stock_str, isSucess_ret, msg_ret
 
@@ -554,7 +687,6 @@ def Verify_level2(date_list=[], checkyear='', checkmonth='', validate=True, peri
         physical_cores = psutil.cpu_count(logical=False)
         subprocess = rebuild_and_verify_daily
     
-    stockstr_list = ['000001']
     for stock_str in stockstr_list:
         tasks.append((date_list, stock_str, checkyear, checkmonth, validate))
     

@@ -27,6 +27,7 @@ dependencies = [
     "common @ file:///E:/gitcode/common",
     "sortedcontainers (>=2.4.0,<3.0.0)",
     "polars (>=1.42.1,<2.0.0)",
+    "line-profiler (>=5.0.2,<6.0.0)",
 ]
 
 [tool.poetry]

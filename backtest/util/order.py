@@ -14,17 +14,20 @@ class DealStatus:
         self.deal_volume += volume
         self.deal_turnover += volume * price
 
+    def get(self):
+        return self.deal_count, self.deal_volume, self.deal_turnover
+
 class OrderNode:
     """订单节点：存储单个订单的明细，双向链表节点"""
-    __slots__ = ('ref_id', 'price', 'qty', 'side', 'timestamp', 'next', 'prev')
-    def __init__(self, ref_id, price, qty, side, timestamp):
+    __slots__ = ('ref_id', 'price', 'qty', 'side', 'next', 'prev', 'price_list')
+    def __init__(self, ref_id, price, qty, side):
         self.ref_id = ref_id        
         self.price = price
         self.qty = qty              
         self.side = side            
-        self.timestamp = timestamp
         self.next = None
         self.prev = None
+        self.price_list = None
 
 class PriceLevelList:
     """价格级队列：维护相同价格下订单的双向链表，保证时间优先 (FIFO)"""
@@ -78,37 +81,39 @@ class OrderBook:
         self.bids = SortedDict()    
         self.asks = SortedDict()                
         self.ref_id_map = {}                    
-        self.deals = {} 
+        self.deals = DealStatus() 
 
         self.total_bid_vol = 0
         self.total_ask_vol = 0
         self.bid_sum_pv = 0
         self.ask_sum_pv = 0
 
-    def insert_order(self, ref_id, price, qty, side, timestamp):
+    def insert_order(self, ref_id, price, qty, side):
         """处理委托：插入新订单"""
         if ref_id in self.ref_id_map:
             return  
 
-        node = OrderNode(ref_id, price, qty, side, timestamp)
+        node = OrderNode(ref_id, price, qty, side)
         self.ref_id_map[ref_id] = node
         
         # 💡 优化 5：增量累加总委托统计
         if side == 'B':
             self.total_bid_vol += qty
             self.bid_sum_pv += price * qty
-            book = self.bids
+            price_list = self.bids.get(price)
+            if price_list is None:
+                price_list = PriceLevelList(price)
+                self.bids[price] = price_list
         else:
             self.total_ask_vol += qty
             self.ask_sum_pv += price * qty
-            book = self.asks
+            price_list = self.asks.get(price)
+            if price_list is None:
+                price_list = PriceLevelList(price)
+                self.asks[price] = price_list
 
-        # dict.get 速度快于 if price not in book
-        price_list = book.get(price)
-        if price_list is None:
-            price_list = PriceLevelList(price)
-            book[price] = price_list
         price_list.append(node)
+        node.price_list = price_list
 
     def cancel_order(self, ref_id, cancel_qty=None):
             """处理撤单"""
@@ -117,15 +122,17 @@ class OrderBook:
                 return False  
             
             side = node.side
-            price = node.price
-            book = self.bids if side == 'B' else self.asks    
-            price_list = book[price]
+            price = node.price   
+            price_list = node.price_list
 
             if cancel_qty is None or cancel_qty >= node.qty:
                 actual_cancel_qty = node.qty
                 price_list.remove(node)
                 if price_list.order_count == 0:
-                    del book[price]
+                    if side == 'B':
+                        del self.bids[price]
+                    else:
+                        del self.asks[price]
                 del self.ref_id_map[ref_id]
             else:
                 actual_cancel_qty = cancel_qty
@@ -149,16 +156,10 @@ class OrderBook:
             
             side = node.side
             price = node.price
-            book = self.bids if side == 'B' else self.asks
-            price_list = book[price]
+            price_list = node.price_list
 
-            # 💡 更新成交明细（原生的 dict 速度极快）
             if side == 'B':
-                status = self.deals.get(exec_price)
-                if status is None:
-                    status = DealStatus()
-                    self.deals[exec_price] = status
-                status.update(exec_qty, exec_price)
+                self.deals.update(exec_qty, exec_price)
 
             # 无论全额还是部分成交，实际从挂单中扣除的量
             actual_exec_qty = node.qty if exec_qty >= node.qty else exec_qty
@@ -166,7 +167,10 @@ class OrderBook:
             if exec_qty >= node.qty:
                 price_list.remove(node)
                 if price_list.order_count == 0:
-                    del book[price]
+                    if side == 'B':
+                        del self.bids[price]
+                    else:
+                        del self.asks[price]
                 del self.ref_id_map[ref_id]
             else:
                 price_list.reduce(node, exec_qty)
@@ -184,8 +188,6 @@ class OrderBook:
     def get_topN_snapshot(self, side, n_levels=5):
         """获取当前五档盘口"""
         if side == 'B':
-            # 💡 优化 6：由于 bids 改为了升序，最高价在尾部。
-            # 直接切片尾部 n_levels 个元素，并原地逆序，纯 C 级别切片，速度极快
             book = self.bids
             keys = book.keys()
             n = len(keys)
@@ -203,17 +205,10 @@ class OrderBook:
         return self.total_bid_vol, self.total_ask_vol, weight_bid_price, weight_ask_price
 
     def get_deal_status(self):
-        total_dealnum = 0
-        total_dealvolume = 0
-        total_dealturnover = 0
-        for level in self.deals.values():
-            total_dealnum += level.deal_count
-            total_dealvolume += level.deal_volume
-            total_dealturnover += level.deal_turnover
-        return total_dealnum, total_dealvolume, total_dealturnover
+        return self.deals.get()
 
 
-    def calibrate_level(self, side, price, true_vol, true_count, timestamp):
+    def calibrate_level(self, side, price, true_vol, true_count):
         """快照对账与基础裁剪"""
         book = self.bids if side == 'B' else self.asks
     
@@ -241,8 +236,8 @@ class OrderBook:
             book[price] = p_list
 
         if true_vol > 0:
-            syn_id = f"syn_{side}_{int(price)}_{timestamp}"
-            syn_node = OrderNode(syn_id, price, true_vol, side, timestamp)
+            syn_id = f"syn_{side}_{int(price)}"
+            syn_node = OrderNode(syn_id, price, true_vol, side)
             self.ref_id_map[syn_id] = syn_node
             p_list.head = syn_node
             p_list.tail = syn_node
