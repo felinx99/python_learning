@@ -2,7 +2,6 @@ import logging
 import datetime
 import psutil
 import shutil
-import traceback
 import gc
 import polars as pl
 import pandas as pd
@@ -459,7 +458,6 @@ def rebuild_and_verify_daily(args):
         snapshot_file = base_path / f"snapshot/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
         
         if not order_file.exists() or not deal_file.exists() or not snapshot_file.exists():
-            print(f"⚠️ 找不到股票{stock_str}在{rday}对应的原始文件，自动跳过。")
             continue
 
         order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume']
@@ -477,12 +475,13 @@ def rebuild_and_verify_daily(args):
 
         isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)  
         if not isSucess:
-            msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | \n 错误信息: {msg}") 
+            msg_ret.append(f"[X] 失败 | {stock_str} : {rday} | 错误信息: {msg}") 
             isSucess_ret = False
         # 清理单日内存占用
         del orday_daily_pl, deal_daily_pl, snapshot_daily_pl
         # gc.collect()
 
+    msg_ret = "".join(msg_ret)
     return stock_str, isSucess_ret, msg_ret
 
 def rebuild_and_verify_monthly(args):
@@ -496,7 +495,6 @@ def rebuild_and_verify_monthly(args):
     snapshot_file = base_path / f"snapshot/{checkyear}/{checkyear}{checkmonth}/{stock_str}.parquet"
 
     if not order_file.exists() or not deal_file.exists() or not snapshot_file.exists():
-        print(f"⚠️ 找不到股票{stock_str}本月对应的原始文件，自动跳过。")
         return stock_str, isSucess_ret, msg_ret
 
     order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume', 'TradingDay']
@@ -525,11 +523,12 @@ def rebuild_and_verify_monthly(args):
 
         isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)
         if not isSucess:
-            msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | \n 错误信息: {msg}") 
+            msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | 错误信息: {msg}") 
             isSucess_ret = False
         del orday_daily_pl, deal_daily_pl, snapshot_daily_pl
         # gc.collect()
 
+    msg_ret = "".join(msg_ret)
     return stock_str, isSucess_ret, msg_ret
 
 def Verify_level2(date_list=[], checkyear='', checkmonth='', validate=True, period='daily'):
@@ -542,7 +541,7 @@ def Verify_level2(date_list=[], checkyear='', checkmonth='', validate=True, peri
     if period == 'monthly':
         staging_root = CONFIG.base_path['LEVEL2_BUFFER_PATH'] / f"monthly/snapshot/{checkyear}/{checkyear}{checkmonth}"
         stockstr_list = [d.stem for d in staging_root.glob(f"*.parquet")]
-        physical_cores = 4
+        physical_cores = 6
         subprocess = rebuild_and_verify_monthly
     elif period == 'daily':
         staging_root = CONFIG.base_path['LEVEL2_BUFFER_PATH']/f"monthlystaging/snapshot/{checkyear}/{checkyear}{checkmonth}"
@@ -554,16 +553,16 @@ def Verify_level2(date_list=[], checkyear='', checkmonth='', validate=True, peri
     for stock_str in stockstr_list:
         tasks.append((date_list, stock_str, checkyear, checkmonth, validate))
     
-    with Pool(physical_cores) as p:
-        print(f" 步骤 4：自建订单薄，与快照比对进行数据校验，")        
+    logging.info(f"  步骤 4: 自建订单薄，与快照比对进行数据校验")   
+    with Pool(physical_cores) as p:     
         results = p.imap_unordered(subprocess, tasks, chunksize=50)
         success_count = 0
         for stock_str, success, msg in results:
             if success:
                 success_count += 1
-                print(f"进程推进中.. 已成功合并 {success_count}/{len(tasks)} 只股票 [{stock_str}]", end="\r")
+                print(f"进程推进中.. 已成功校验 {success_count}/{len(tasks)} 只股票 [{stock_str}]", end="\r")
             else:
-                logging.error(msg)
+                logging.error(f"\n{msg}")
 
 def fix_order_bizindex(order_df=None, deal_df=None):
     ret = True
@@ -632,11 +631,11 @@ def check_deal(df_order, df_deal):
 
 def presplit(date_list=[], checkmonth='', checkyear='2026'):
     """
-    每日或隔2~3日运行（单线程）：
+    每日或隔2~3日运行(单线程):
     1. 读取 snapshot 每日全市场大文件。
     2. 极速拆分并分流存储进暂存区股票文件夹中。
     """
-    print(f"🎬  步骤 1：对 {checkyear}-{checkmonth} 批次 {date_list} 的全市场大文件进行分盘...")
+    logging.info(f"  步骤 1: 对 {checkyear}-{checkmonth} 批次 {date_list} 的全市场大文件进行分盘...")
     
     base_buffer = CONFIG.base_path['LEVEL2_BUFFER_PATH']
     
@@ -735,12 +734,12 @@ def presplit(date_list=[], checkmonth='', checkyear='2026'):
 
 def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkyear='2026'):
     """
-    每日或隔2~3日运行（单线程）：
+    每日或隔2~3日运行(单线程):
     1. 读取 order, deal 每日全市场大文件并按股票分流。
     2. 对比补齐 deal 中缺失的 [-1, -11] 撤单数据。
     3. 增量追加进 Staging 暂存区对应的股票文件夹中。
     """
-    print(f"🎬 步骤 2：对{checkyear}-{checkmonth} 批次 {date_list} 的 Order & Deal 增量数据清洗...")
+    logging.info(f"  步骤 2: 对{checkyear}-{checkmonth} 批次 {date_list} 的 Order & Deal 增量数据清洗...")
     
     base_buffer = CONFIG.base_path['LEVEL2_BUFFER_PATH']
     
@@ -754,7 +753,9 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
     msg_chunks = []
 
     for rday in date_list:
-        print(f"⏱️ 正在处理交易日{rday}的 Order/Deal 数据...")          
+        print(f"⏱️ 正在处理交易日{rday}的 Order/Deal 数据...") 
+        order_failcount = 0
+        deal_failcount = 0         
         try:
             # 3.1 读取每日全市场大文件（全天只读一次）
             stockcode_list = [d.name for d in stage_order_root.iterdir() if d.is_dir()]
@@ -778,12 +779,12 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
                 df_deal['SecuCode'] = stock_code
                 # 修正在吞单情况下，order的BizIndex序号比deal大的错误，导致deal先执行Order还未生成
                 df_order, ret = fix_order_bizindex(df_order, df_deal)
-                if not ret:
-                    msg_chunks.append(f"{rday} 股票{stock_str} BizIndex错误 \n")
+                if not ret: order_failcount += 1
+                   
                 # 补齐 deal中缺失的 [-1, -11] 的撤单数据
                 df_deal, ret = check_deal(df_order, df_deal)
-                if not ret:
-                    msg_chunks.append(f"{rday} 股票{stock_str} deal缺失撤单信号 \n")
+                if not ret: deal_failcount += 1
+                    
 
                 #对order和deal排序
                 if df_order['BizIndex'].iat[10] > 0 and df_order['BizIndex'].iat[10] != df_order['OrderID'].iat[10]:
@@ -811,10 +812,15 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
             
             # 严格释放内存
             gc.collect()
+            if order_failcount:
+                msg_chunks.append(f"{rday} 共 {order_failcount} 股票 BizIndex错误 \n")
+            if deal_failcount:
+                msg_chunks.append(f"{rday} 共 {deal_failcount} 股票 deal缺失撤单信号 \n")
+
             
         except Exception as e:
-            msg_chunks.append(f"❌ 处理交易日 {rday} (Order/Deal) 失败, 代码异常")
-            print(f"❌ 处理交易日 {rday} (Order/Deal) 失败: {e}\n{traceback.format_exc()}")
+            msg_chunks.append(f"❌ 处理交易日 {rday} (Order/Deal) 失败, 代码异常: {e}")
+            print(f"❌ 处理交易日 {rday} (Order/Deal) 失败: {e}")
     
     ret_msg = "".join(msg_chunks)
     return ret_msg
@@ -825,11 +831,11 @@ def generate_staging_order_and_deal_dateset(date_list=[], checkmonth='', checkye
 # =================================================================
 def generate_staging_snapshot_dateset(date_list=[], checkyear='2026', checkmonth=''):
     """
-    每日或隔2~3日运行（单线程）：
+    每日或隔2~3日运行(单线程):
     1. 读取 snapshot 每日全市场大文件。
     2. 极速拆分并分流存储进暂存区股票文件夹中。
     """
-    print(f"🎬 步骤 3：对{checkyear}-{checkmonth} 批次 {date_list} 的 Snapshot & Order_raw 增量分流...")
+    logging.info(f"  步骤 3: 对{checkyear}-{checkmonth} 批次 {date_list} 的 Snapshot & Order_raw 增量分流...")
     
     base_buffer = CONFIG.base_path['LEVEL2_BUFFER_PATH']
     
@@ -888,7 +894,7 @@ def generate_staging_snapshot_dateset(date_list=[], checkyear='2026', checkmonth
             gc.collect()
             
         except Exception as e:
-            print(f"❌ 处理快照交易日 {rday} 失败: {e}\n{traceback.format_exc()}")
+            print(f"❌ 处理快照交易日 {rday} 失败: {e}")
 
 
 # =================================================================
@@ -960,7 +966,7 @@ def _merge_single_stock(dtype='', checkmonth='', checkyear='2026'):
         print(f"✨ [进程完成] 数据类型 [{dtype}] 的全月大融合落盘成功。")
         
     except Exception as e:
-        print(f"💥 [{dtype} 进程] 发生严重异常崩溃: {e}\n{traceback.format_exc()}")
+        print(f"💥 [{dtype} 进程] 发生严重异常崩溃: {e}")
 
 def generate_monthly_dateset(checkyear=0, checkmonth=''):
     """
@@ -994,6 +1000,7 @@ if __name__ == '__main__':
     #     20260622, 20260623, 20260624, 20260625, 20260626,
     #     20260629, 20260630
     # ] 
+
     date_list = [
         # 20260701, 20260702, 20260703,         
         20260706, 
@@ -1002,15 +1009,19 @@ if __name__ == '__main__':
         # 20260720, 20260721, 20260722, 20260723, 20260724,
         # 20260727, 20260728, 20260729, 20260730, 20260721
     ]
+
+    s_date = str(date_list[0])
+    cur_year = s_date[:4]
+    cur_month = s_date[4:6]
     # ------------ 每日更新任务 --------------------
-    # presplit(date_list=date_list, checkmonth='07', checkyear='2026')
-    # msg = generate_staging_order_and_deal_dateset(date_list=date_list, checkmonth='07', checkyear='2026')
-    # if msg: logging.warning(msg)
-    # generate_staging_snapshot_dateset(date_list=date_list, checkmonth='07', checkyear='2026')
-    Verify_level2(date_list=date_list, checkmonth='07', checkyear='2026', period='daily', validate=True)    #每日更新
+    presplit(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
+    msg = generate_staging_order_and_deal_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
+    if msg: logging.warning(msg)
+    generate_staging_snapshot_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
+    Verify_level2(date_list=date_list, checkmonth=cur_month, checkyear=cur_year, period='daily', validate=True)    #每日更新
     
     # ------------ 月底存档任务 --------------------
-    # generate_monthly_dateset(checkmonth='06', checkyear='2026')
-    # Verify_level2(checkmonth='06', checkyear='2026', period='monthly', validate=True)   #月底存档文件检查
+    # generate_monthly_dateset(checkmonth=cur_month, checkyear=cur_year)
+    # Verify_level2(checkmonth=cur_month, checkyear=cur_year, period='monthly', validate=True)   #月底存档文件检查
 
     
