@@ -12,7 +12,7 @@ import pyarrow.parquet as pq
 from common import CONFIG, DATAFRAME
 from dataclasses import dataclass
 from enum import IntEnum
-from multiprocessing import Pool
+from multiprocessing import Pool, Process, Pipe
 from api.timeprofile import TimeProfile
 from .util.order import OrderBook
 
@@ -373,7 +373,7 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
         
     # 直接消费磁盘流，内存开销恒定
     for event_type, event_time, row in stream_l2_timeline(orday_daily_pl, deal_daily_pl):  
-        if event_type == 'Order':
+        if event_type == 'Order':       
             order_type = row.OrderType
             if order_type in [0, 2]:    # 委买/限价委买
                 ob.insert_order(row.OrderID, row.Price, row.Volume, 'B')
@@ -860,7 +860,6 @@ def generate_staging_snapshot_dateset(date_list=[], checkyear='2026', checkmonth
                 src_snapshot = dst_dir_snapshot / f"tmp_split/{stock_code}/{rday}_0.parquet"
                 src_order_raw = dst_dir_order_raw / f"tmp_split/{stock_code}/{rday}_0.parquet"
                 if not src_snapshot.exists() or not src_order_raw.exists():
-                    print(f"⚠️ 找不到{rday}股票{stock_str}的snapshot或order_raw 原始文件，自动跳过。")
                     continue
 
                 df_snapshot = pq.read_table(src_snapshot).to_pandas()
@@ -987,6 +986,37 @@ def generate_monthly_dateset(checkyear=0, checkmonth=''):
         
     print(f"🏁 【全功告成】Batch {checkyear}-{checkmonth} 进程池内所有流水线均已安全返回。")
 
+def _wrapper_order_deal(conn, date_list, checkmonth, checkyear):
+    msg = generate_staging_order_and_deal_dateset(
+        date_list=date_list, 
+        checkmonth=checkmonth, 
+        checkyear=checkyear
+    )
+    conn.send(msg)  # 通过管道发送
+    conn.close()
+
+def generate_staging_dateset(date_list=[], checkmonth='', checkyear=''):
+    parent_conn, child_conn = Pipe()
+
+    p1 = Process(
+        target=_wrapper_order_deal, 
+        args=(child_conn, date_list, checkmonth, checkyear)
+    )
+    p2 = Process(
+        target=generate_staging_snapshot_dateset, 
+        kwargs={"date_list": date_list, "checkmonth": checkmonth, "checkyear": checkyear}
+    )
+
+    p1.start()
+    p2.start()
+
+    msg = parent_conn.recv() 
+    
+    p1.join()
+    p2.join()
+
+    if msg: 
+        logging.warning(msg)
 
 if __name__ == '__main__':
     min1 = Resample(timeframe=TimeFrame.Minutes, compression=1)
@@ -1003,8 +1033,8 @@ if __name__ == '__main__':
 
     date_list = [
         # 20260701, 20260702, 20260703,         
-        20260706, 
-        # 20260707, 20260708, 20260709, 20260710,
+        # 20260706, 20260707, 20260708, 20260709, 
+        20260710, 20260713
         # 20260713, 20260714, 20260715, 20260716, 20260717,
         # 20260720, 20260721, 20260722, 20260723, 20260724,
         # 20260727, 20260728, 20260729, 20260730, 20260721
@@ -1014,14 +1044,12 @@ if __name__ == '__main__':
     cur_year = s_date[:4]
     cur_month = s_date[4:6]
     # ------------ 每日更新任务 --------------------
-    presplit(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-    msg = generate_staging_order_and_deal_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-    if msg: logging.warning(msg)
-    generate_staging_snapshot_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-    Verify_level2(date_list=date_list, checkmonth=cur_month, checkyear=cur_year, period='daily', validate=True)    #每日更新
+    # presplit(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
+    # generate_staging_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
+    Verify_level2(date_list=date_list, checkmonth=cur_month, checkyear=cur_year, period='daily', validate=True)    #每日更新并检验数据
     
     # ------------ 月底存档任务 --------------------
     # generate_monthly_dateset(checkmonth=cur_month, checkyear=cur_year)
-    # Verify_level2(checkmonth=cur_month, checkyear=cur_year, period='monthly', validate=True)   #月底存档文件检查
+    # Verify_level2(checkmonth=cur_month, checkyear=cur_year, period='monthly', validate=True)   #月底存档并检验数据
 
     
