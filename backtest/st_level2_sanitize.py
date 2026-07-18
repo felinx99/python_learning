@@ -338,8 +338,7 @@ def check_10_levels(ob=None, snapshot=None, decimals=0):
         VOL_THRESHOLD = 20  # 允许十档委托量的绝对值偏差
 
         # 1. 提取本地数据与快照数据 (直接使用原始 List[Tuple])
-        my_bids = ob.get_topN_snapshot('B', n_levels=10)
-        my_asks = ob.get_topN_snapshot('S', n_levels=10)
+        my_bids, my_asks = ob.get_topN_snapshot(n_levels=10)
 
         cached_snap_bids = [(getattr(snapshot, f'BidPrice{i}'), getattr(snapshot, f'BidVolume{i}'), getattr(snapshot, f'BidOrder{i}')) for i in range(1, 11)]
         cached_snap_asks = [(getattr(snapshot, f'AskPrice{i}'), getattr(snapshot, f'AskVolume{i}'), getattr(snapshot, f'AskOrder{i}')) for i in range(1, 11)]
@@ -359,10 +358,29 @@ def check_10_levels(ob=None, snapshot=None, decimals=0):
 
     return False
 
-def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_daily_pl=None, need_checksnapshot = True):
+def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_daily_pl=None, params=(), need_savefile = True, need_checksnapshot = True):
     isSucess = True
     msg = ''
     ob = OrderBook() 
+
+    checkyear, checkmonth, stock_str, rday = params
+
+    if need_savefile:
+        cancel_plus_list = []  # 仅存放: [DealID, CancelPrice, OB_Level, OB_QueuePos]
+        # num_deals = len(deal_daily_pl) # 精准获知今天总成交/撤单事件行数
+        
+        # # 预分配全平铺的 61 列基础数值矩阵 (完全规避对象引用)
+        # ob_deal_ids = deal_daily_pl['DealID'].to_numpy()
+        # ob_bid_prices = np.zeros((num_deals, 10), dtype=np.int32)
+        # ob_bid_vols = np.zeros((num_deals, 10), dtype=np.int64)
+        # ob_bid_counts = np.zeros((num_deals, 10), dtype=np.int32)
+        
+        # ob_ask_prices = np.zeros((num_deals, 10), dtype=np.int32)
+        # ob_ask_vols = np.zeros((num_deals, 10), dtype=np.int64)
+        # ob_ask_counts = np.zeros((num_deals, 10), dtype=np.int32)
+        
+        # deal_idx = 0  # 高速矩阵行指针
+
 
     if need_checksnapshot:
         snapshot_stream = stream_from_snapshot(snapshot_daily_pl)
@@ -370,7 +388,7 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
         while curr_snapshot.TotalBidVolume==0 and curr_snapshot.TotalAskVolume==0:
             curr_snapshot, target_decimals, curr_snapshot_timeout = next(snapshot_stream, (None,None,180000000))
         local_total_cumvolume = 0           #累积交易量，用于快速比较是否需要进行snapshot检验，不符的肯定不用检验
-        
+    
     # 直接消费磁盘流，内存开销恒定
     for event_type, event_time, row in stream_l2_timeline(orday_daily_pl, deal_daily_pl):  
         if event_type == 'Order':       
@@ -394,17 +412,37 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
                 # 交易所 L2 机制：一笔成交双边扣减                            
                 ob.execute_trade(ref_id=row.BuyID, exec_qty=row.Volume, exec_price=row.Price)
                 ob.execute_trade(ref_id=row.SellID, exec_qty=row.Volume, exec_price=row.Price)
-
+ 
                 if need_checksnapshot:
                     local_total_cumvolume += row.Volume
                     if local_total_cumvolume == curr_snapshot.TotalVolume:
                         curr_snapshot_timeout = row.DealTimeNext
 
-            elif side == -1:  # 买单撤单
-                ob.cancel_order(ref_id=row.BuyID, cancel_qty=row.Volume)
-            elif side == -11: # 卖单撤单
-                ob.cancel_order(ref_id=row.SellID, cancel_qty=row.Volume)
-
+            elif side in [-1, -11]:  # 买单撤单 # 卖单撤单
+                ref_id = row.BuyID if side == -1 else row.SellID
+                orig_price, level_idx, queue_pos = ob.cancel_order(ref_id=ref_id, cancel_qty=row.Volume)
+                if need_savefile:
+                    cancel_plus_list.append({'DealID': row.DealID, 'CancelPrice': orig_price, 'OB_Level': level_idx, 'OB_QueuePos': queue_pos})
+                
+            # if need_savefile:               
+            #     cached_top_bids = heapq.nlargest(10, ob.bids.keys())    
+            #     cached_top_asks = heapq.nsmallest(10, ob.asks.keys())            
+                
+            #     # 买方十档高速平铺赋值
+            #     n_bids = len(cached_top_bids)
+            #     ob_bid_prices[deal_idx, :n_bids] = cached_top_bids
+            #     bid_lvls = [ob.bids[p] for p in cached_top_bids]
+            #     ob_bid_vols[deal_idx, :n_bids] = [l.total_volume for l in bid_lvls]
+            #     ob_bid_counts[deal_idx, :n_bids] = [l.order_count for l in bid_lvls]
+                    
+            #     # 卖方十档高速平铺赋值
+            #     n_asks = len(cached_top_asks)
+            #     ob_ask_prices[deal_idx, :n_asks] = cached_top_asks
+            #     ask_lvls = [ob.asks[p] for p in cached_top_asks]
+            #     ob_ask_vols[deal_idx, :n_asks] = [l.total_volume for l in ask_lvls]
+            #     ob_ask_counts[deal_idx, :n_asks] = [l.order_count for l in ask_lvls]
+                    
+            #     deal_idx += 1
         if need_checksnapshot and curr_snapshot is not None:
             # 1. 判断snapshot是否与当前ob是否相同。
             # 2. 不相同: 则读入下一个order/deal数据
@@ -432,6 +470,37 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
                         else:
                             verified = False    #此分支不能删除，在while循环多次后需要退出
 
+    if need_savefile:
+        if cancel_plus_list:
+            cancel_dir = CONFIG.base_path['LEVEL2_BUFFER_PATH'] / 'monthlystaging' / f"cancel/{checkyear}/{checkyear}{checkmonth}/{stock_str}"
+            cancel_dir.mkdir(parents=True, exist_ok=True)
+            cancel_file = cancel_dir / f"{stock_str}_{rday}.parquet"
+
+            cancel_base = deal_daily_pl.filter(deal_daily_pl['Side'].is_in([-1, -11]))
+            df_plus_pl = pl.DataFrame(cancel_plus_list)
+            df_cancel_final = cancel_base.join(df_plus_pl, on="DealID", how="left")
+            df_cancel_final.write_parquet(cancel_file, compression='zstd')
+
+
+        # if deal_idx > 0:
+        #     ob_dir = CONFIG.base_path['LEVEL2_BUFFER_PATH'] / 'monthlystaging' / f"orderbook/{checkyear}/{checkyear}{checkmonth}/{stock_str}"
+        #     ob_dir.mkdir(parents=True, exist_ok=True)
+        #     ob_file = ob_dir / f"{stock_str}_{rday}.parquet"
+
+        #     # 动态切片截取实际有效行（防止尾部零富余），并构建纯数值平铺字典
+        #     ob_df_dict = {'DealID': ob_deal_ids[:deal_idx]}
+        #     for i in range(1, 11):
+        #         idx = i - 1
+        #         ob_df_dict[f'BidPrice{i}'] = ob_bid_prices[:deal_idx, idx]
+        #         ob_df_dict[f'BidVolume{i}'] = ob_bid_vols[:deal_idx, idx]
+        #         ob_df_dict[f'BidOrder{i}'] = ob_bid_counts[:deal_idx, idx]
+                
+        #         ob_df_dict[f'AskPrice{i}'] = ob_ask_prices[:deal_idx, idx]
+        #         ob_df_dict[f'AskVolume{i}'] = ob_ask_vols[:deal_idx, idx]
+        #         ob_df_dict[f'AskOrder{i}'] = ob_ask_counts[:deal_idx, idx]
+            
+        #     pd.DataFrame(ob_df_dict).to_parquet(ob_file, compression='zstd', index=False)
+                
     # msg = "".join(msg_chunks)     
     return isSucess, msg
 
@@ -440,10 +509,8 @@ def rebuild_and_verify_daily(args):
     从磁盘流式读取并构建订单薄
     :param order_file: 逐笔委托 parquet 文件路径
     :param deal_file: 逐笔成交 parquet 文件路径
-    :param market: 市场标识，'SH' 代表沪市，'SZ' 代表深市
-    :param batch_size: 磁盘缓存块大小
     """
-    date_list, stock_str, checkyear, checkmonth, validate=args
+    date_list, stock_str, checkyear, checkmonth, bsave, bvalidate=args
     isSucess_ret = True
     msg_ret = []
 
@@ -473,7 +540,8 @@ def rebuild_and_verify_daily(args):
     
         snapshot_daily_pl = pl.read_parquet(snapshot_file, columns=snapshot_columns)
 
-        isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)  
+        params = (checkyear, checkmonth, stock_str, rday)
+        isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, params, bsave, bvalidate)  
         if not isSucess:
             msg_ret.append(f"[X] 失败 | {stock_str} : {rday} | 错误信息: {msg}") 
             isSucess_ret = False
@@ -485,7 +553,7 @@ def rebuild_and_verify_daily(args):
     return stock_str, isSucess_ret, msg_ret
 
 def rebuild_and_verify_monthly(args):
-    date_list, stock_str, checkyear, checkmonth, validate=args
+    date_list, stock_str, checkyear, checkmonth, bsave, bvalidate=args
     isSucess_ret = True
     msg_ret = []
 
@@ -520,8 +588,8 @@ def rebuild_and_verify_monthly(args):
         orday_daily_pl = order_dict[rday]
         deal_daily_pl = deal_dict.get(rday, pl.DataFrame(schema=deal_monthly_pl.schema))
         snapshot_daily_pl = snapshot_dict.get(rday, pl.DataFrame(schema=snapshot_monthly_pl.schema))
-
-        isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, validate)
+        params = (checkyear, checkmonth, stock_str, rday)
+        isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, params, bsave, bvalidate)
         if not isSucess:
             msg_ret.append(f"[X] 失败 | {rday} : {stock_str} | 错误信息: {msg}") 
             isSucess_ret = False
@@ -531,7 +599,7 @@ def rebuild_and_verify_monthly(args):
     msg_ret = "".join(msg_ret)
     return stock_str, isSucess_ret, msg_ret
 
-def Verify_level2(date_list=[], checkyear='', checkmonth='', validate=True, period='daily'):
+def Verify_level2(date_list=[], checkyear='', checkmonth='', bsave=True, bvalidate=True, period='daily'):
     tasks = []
     staging_root = None
     stockstr_list = []
@@ -551,7 +619,7 @@ def Verify_level2(date_list=[], checkyear='', checkmonth='', validate=True, peri
         subprocess = rebuild_and_verify_daily
     
     for stock_str in stockstr_list:
-        tasks.append((date_list, stock_str, checkyear, checkmonth, validate))
+        tasks.append((date_list, stock_str, checkyear, checkmonth, bsave, bvalidate))
     
     logging.info(f"  步骤 4: 自建订单薄，与快照比对进行数据校验")   
     with Pool(physical_cores) as p:     
@@ -1033,9 +1101,10 @@ if __name__ == '__main__':
 
     date_list = [
         # 20260701, 20260702, 20260703,         
-        # 20260706, 20260707, 20260708, 20260709, 
-        20260710, 20260713
-        # 20260713, 20260714, 20260715, 20260716, 20260717,
+        # 20260706, 20260707, 20260708, 20260709, 20260710, 
+        # 20260713, 
+        20260714, 
+        # 20260715, 20260716, 20260717,
         # 20260720, 20260721, 20260722, 20260723, 20260724,
         # 20260727, 20260728, 20260729, 20260730, 20260721
     ]
@@ -1046,10 +1115,12 @@ if __name__ == '__main__':
     # ------------ 每日更新任务 --------------------
     # presplit(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
     # generate_staging_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-    Verify_level2(date_list=date_list, checkmonth=cur_month, checkyear=cur_year, period='daily', validate=True)    #每日更新并检验数据
+    # 每日更新,检验数据,存档cancel和orderbook文件
+    Verify_level2(date_list=date_list, checkmonth=cur_month, checkyear=cur_year, period='daily', bsave=True, bvalidate=True)    
     
     # ------------ 月底存档任务 --------------------
     # generate_monthly_dateset(checkmonth=cur_month, checkyear=cur_year)
-    # Verify_level2(checkmonth=cur_month, checkyear=cur_year, period='monthly', validate=True)   #月底存档并检验数据
+    #月底存档,检验数据
+    # Verify_level2(checkmonth=cur_month, checkyear=cur_year, period='monthly', bsave=Fasle, bvalidate=True)   #月底存档并检验数据
 
     

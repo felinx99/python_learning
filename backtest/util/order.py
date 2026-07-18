@@ -116,11 +116,25 @@ class OrderBook:
             """处理撤单"""
             node = self.ref_id_map.get(ref_id)
             if node is None:
-                return False  
+                return 0, -1, -1  
             
             side = node.side
             price = node.price   
             price_list = node.price_list
+
+            queue_pos = 1
+            curr = node.prev
+            while curr is not None:
+                queue_pos += 1
+                curr = curr.prev
+
+            # 3. 计算十档深度 (level_idx)
+            if side == 'B':
+                sorted_prices = sorted(self.bids.keys(), reverse=True)
+            else:
+                sorted_prices = sorted(self.asks.keys())
+
+            level_idx = sorted_prices.index(price) + 1 
 
             if cancel_qty is None or cancel_qty >= node.qty:
                 actual_cancel_qty = node.qty
@@ -143,7 +157,7 @@ class OrderBook:
                 self.total_ask_vol -= actual_cancel_qty
                 self.ask_sum_pv -= price * actual_cancel_qty
 
-            return True
+            return price, level_idx, queue_pos
 
     def execute_trade(self, ref_id, exec_qty, exec_price):
             """处理成交"""
@@ -182,20 +196,26 @@ class OrderBook:
 
             return True
 
-    def get_topN_snapshot(self, side, n_levels=5):
-        """获取当前五档盘口"""
-        if side == 'B':
-            if not self.bids: return []
-            # 买方：价格从大到小排，取前 N 档
-            sorted_prices = sorted(self.bids.keys(), reverse=True)[:n_levels]
-            book = self.bids
-        else:
-            if not self.asks: return []
-            # 卖方：价格从小到大排，取前 N 档
-            sorted_prices = sorted(self.asks.keys())[:n_levels]
-            book = self.asks
-            
-        return [(p, book[p].total_volume, book[p].order_count) for p in sorted_prices]
+    def get_topN_snapshot(self, n_levels=5):
+        """获取当前n_levels档盘口"""
+        bids_list = []
+        asks_list = []
+
+        # 买方：价格从大到小排，取前 N 档
+        sorted_bid_prices = sorted(self.bids.keys(), reverse=True)[:n_levels]
+        bids_list = [
+            (p, self.bids[p].total_volume, self.bids[p].order_count) 
+            for p in sorted_bid_prices
+        ]
+
+        # 卖方：价格从小到大排，取前 N 档
+        sorted_ask_prices = sorted(self.asks.keys())[:n_levels]
+        asks_list = [
+            (p, self.asks[p].total_volume, self.asks[p].order_count) 
+            for p in sorted_ask_prices
+        ]   
+    
+        return bids_list, asks_list
 
     def get_orderbook_stats(self):
         weight_bid_price = round((self.bid_sum_pv / self.total_bid_vol) if self.total_bid_vol > 0 else 0.0, 4)
@@ -210,3 +230,29 @@ class OrderBook:
 
     def get_bbo_ask(self):        
         return min(self.asks.keys()) if self.asks else 0
+
+    def get_order_location(self, ref_id):
+        node = self.ref_id_map.get(ref_id)
+        if node is None:
+            return 0, -1, -1
+        
+        price = node.price
+        side = node.side
+        
+        queue_pos = 1
+        curr = node.prev
+        while curr is not None:
+            queue_pos += 1
+            curr = curr.prev
+
+        if side == 'B':
+            sorted_prices = sorted(self.bids.keys(), reverse=True)
+        else:
+            sorted_prices = sorted(self.asks.keys())
+            
+
+        idx = sorted_prices.index(price)
+        level_idx = idx + 1 
+
+            
+        return price, level_idx, queue_pos
