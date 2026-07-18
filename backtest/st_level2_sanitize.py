@@ -366,7 +366,7 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
     checkyear, checkmonth, stock_str, rday = params
 
     if need_savefile:
-        cancel_plus_list = []  # 仅存放: [DealID, CancelPrice, OB_Level, OB_QueuePos]
+        cancel_plus_list = []  # 仅存放: [DealID, CancelPrice, OBLevel, QueuePos]
 
     if need_checksnapshot:
         snapshot_stream = stream_from_snapshot(snapshot_daily_pl)
@@ -408,7 +408,7 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
                 ref_id = row.BuyID if side == -1 else row.SellID
                 orig_price, level_idx, queue_pos = ob.cancel_order(ref_id=ref_id, cancel_qty=row.Volume)
                 if need_savefile:
-                    cancel_plus_list.append({'DealID': row.DealID, 'CancelPrice': orig_price, 'OB_Level': level_idx, 'OB_QueuePos': queue_pos})
+                    cancel_plus_list.append({'DealID': row.DealID, 'CancelPrice': orig_price, 'OBLevel': level_idx, 'QueuePos': queue_pos})
         
         if need_checksnapshot and curr_snapshot is not None:
             # 1. 判断snapshot是否与当前ob是否相同。
@@ -444,7 +444,12 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
             cancel_file = cancel_dir / f"{stock_str}_{rday}.parquet"
 
             cancel_base = deal_daily_pl.filter(deal_daily_pl['Side'].is_in([-1, -11]))
-            df_plus_pl = pl.DataFrame(cancel_plus_list)
+            df_plus_pl = pl.DataFrame(cancel_plus_list, schema={
+                'DealID': pl.Int64,
+                'CancelPrice': pl.Int32,
+                'OBLevel': pl.Int32,
+                'QueuePos': pl.Int32
+            })
             df_cancel_final = cancel_base.join(df_plus_pl, on="DealID", how="left")
             df_cancel_final.write_parquet(cancel_file, compression='zstd')
 
@@ -1049,11 +1054,10 @@ if __name__ == '__main__':
     date_list = [
         # 20260701, 20260702, 20260703,         
         # 20260706, 20260707, 20260708, 20260709, 20260710, 
-        # 20260713, 
-        20260714, 
-        # 20260715, 20260716, 20260717,
-        # 20260720, 20260721, 20260722, 20260723, 20260724,
-        # 20260727, 20260728, 20260729, 20260730, 20260721
+        # 20260713, 20260714, 20260715, 20260716, 20260717,
+        20260720, 
+        # 20260721, 20260722, 20260723, 20260724,
+        # 20260727, 20260728, 20260729, 20260730, 20260731
     ]
 
     s_date = str(date_list[0])
