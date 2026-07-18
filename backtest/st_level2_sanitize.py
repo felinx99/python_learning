@@ -367,20 +367,6 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
 
     if need_savefile:
         cancel_plus_list = []  # 仅存放: [DealID, CancelPrice, OB_Level, OB_QueuePos]
-        # num_deals = len(deal_daily_pl) # 精准获知今天总成交/撤单事件行数
-        
-        # # 预分配全平铺的 61 列基础数值矩阵 (完全规避对象引用)
-        # ob_deal_ids = deal_daily_pl['DealID'].to_numpy()
-        # ob_bid_prices = np.zeros((num_deals, 10), dtype=np.int32)
-        # ob_bid_vols = np.zeros((num_deals, 10), dtype=np.int64)
-        # ob_bid_counts = np.zeros((num_deals, 10), dtype=np.int32)
-        
-        # ob_ask_prices = np.zeros((num_deals, 10), dtype=np.int32)
-        # ob_ask_vols = np.zeros((num_deals, 10), dtype=np.int64)
-        # ob_ask_counts = np.zeros((num_deals, 10), dtype=np.int32)
-        
-        # deal_idx = 0  # 高速矩阵行指针
-
 
     if need_checksnapshot:
         snapshot_stream = stream_from_snapshot(snapshot_daily_pl)
@@ -423,26 +409,7 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
                 orig_price, level_idx, queue_pos = ob.cancel_order(ref_id=ref_id, cancel_qty=row.Volume)
                 if need_savefile:
                     cancel_plus_list.append({'DealID': row.DealID, 'CancelPrice': orig_price, 'OB_Level': level_idx, 'OB_QueuePos': queue_pos})
-                
-            # if need_savefile:               
-            #     cached_top_bids = heapq.nlargest(10, ob.bids.keys())    
-            #     cached_top_asks = heapq.nsmallest(10, ob.asks.keys())            
-                
-            #     # 买方十档高速平铺赋值
-            #     n_bids = len(cached_top_bids)
-            #     ob_bid_prices[deal_idx, :n_bids] = cached_top_bids
-            #     bid_lvls = [ob.bids[p] for p in cached_top_bids]
-            #     ob_bid_vols[deal_idx, :n_bids] = [l.total_volume for l in bid_lvls]
-            #     ob_bid_counts[deal_idx, :n_bids] = [l.order_count for l in bid_lvls]
-                    
-            #     # 卖方十档高速平铺赋值
-            #     n_asks = len(cached_top_asks)
-            #     ob_ask_prices[deal_idx, :n_asks] = cached_top_asks
-            #     ask_lvls = [ob.asks[p] for p in cached_top_asks]
-            #     ob_ask_vols[deal_idx, :n_asks] = [l.total_volume for l in ask_lvls]
-            #     ob_ask_counts[deal_idx, :n_asks] = [l.order_count for l in ask_lvls]
-                    
-            #     deal_idx += 1
+        
         if need_checksnapshot and curr_snapshot is not None:
             # 1. 判断snapshot是否与当前ob是否相同。
             # 2. 不相同: 则读入下一个order/deal数据
@@ -481,26 +448,6 @@ def rebuild_and_verify_OB(orday_daily_pl=None, deal_daily_pl=None, snapshot_dail
             df_cancel_final = cancel_base.join(df_plus_pl, on="DealID", how="left")
             df_cancel_final.write_parquet(cancel_file, compression='zstd')
 
-
-        # if deal_idx > 0:
-        #     ob_dir = CONFIG.base_path['LEVEL2_BUFFER_PATH'] / 'monthlystaging' / f"orderbook/{checkyear}/{checkyear}{checkmonth}/{stock_str}"
-        #     ob_dir.mkdir(parents=True, exist_ok=True)
-        #     ob_file = ob_dir / f"{stock_str}_{rday}.parquet"
-
-        #     # 动态切片截取实际有效行（防止尾部零富余），并构建纯数值平铺字典
-        #     ob_df_dict = {'DealID': ob_deal_ids[:deal_idx]}
-        #     for i in range(1, 11):
-        #         idx = i - 1
-        #         ob_df_dict[f'BidPrice{i}'] = ob_bid_prices[:deal_idx, idx]
-        #         ob_df_dict[f'BidVolume{i}'] = ob_bid_vols[:deal_idx, idx]
-        #         ob_df_dict[f'BidOrder{i}'] = ob_bid_counts[:deal_idx, idx]
-                
-        #         ob_df_dict[f'AskPrice{i}'] = ob_ask_prices[:deal_idx, idx]
-        #         ob_df_dict[f'AskVolume{i}'] = ob_ask_vols[:deal_idx, idx]
-        #         ob_df_dict[f'AskOrder{i}'] = ob_ask_counts[:deal_idx, idx]
-            
-        #     pd.DataFrame(ob_df_dict).to_parquet(ob_file, compression='zstd', index=False)
-                
     # msg = "".join(msg_chunks)     
     return isSucess, msg
 
