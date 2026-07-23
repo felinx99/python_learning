@@ -1,6 +1,7 @@
 import pandas as pd
 import talib as ta
 import numpy as np
+import json
 import time
 from datetime import datetime, timedelta
 from common import CONFIG
@@ -47,6 +48,21 @@ def data_to_df(data):
 
 #初始化
 tq.initialize(__file__)
+
+tradingdate_dict = {}
+dstfile = CONFIG.l2_path['STOCK_META']/f"stock_tradingdate.json"
+for year in range(2000, 2027):
+    year_str = str(year)
+    startdate = year_str+'0101'
+    enddate = year_str+'1231'
+    trade_dates = tq.get_trading_dates(market = 'SH', start_time = startdate, end_time = enddate, count = -1)
+    print(trade_dates)
+    tradingdate_dict[year_str] = trade_dates
+
+with open(dstfile, 'w', encoding='utf-8') as f:
+    json.dump(tradingdate_dict, f, ensure_ascii=False, indent=4)
+
+pass
 '''
 print(unicodedata.name('✅'))
 print(unicodedata.name('❌'))

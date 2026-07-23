@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-import psutil
 
 from multiprocessing import Pool
 from functools import partial
@@ -217,7 +216,7 @@ def run_strategy(target_year='', batch_size=1000):
     top300_filename = CONFIG.base_path['STOCK_OUTPUT_PATH']/f"{target_year}_top300_analysis.csv"
 
     process_stockpartial = partial(process_stock, stockdata_path=CONFIG.tdx_data_path[DATAFRAME['DAY']], start_date=target_year)
-    physical_cores = psutil.cpu_count(logical=False)
+    physical_cores = 8
     
     #for p in stock_list:
         #process_stock(stock_name=p, stockdata_path=stockdata_path, target_year=target_year)  # 测试单个股票处理函数

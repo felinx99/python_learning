@@ -134,13 +134,13 @@ def check_file_time_boundary(file_path, time_col, date):
 def process_single_stock_day(date, stock_code):
     daily_feature_dict={}
 
-    #order_file = CONFIG.base_path['A_LEVEL2']/f"202605/order/{stock_code}.parquet"
-    #deal_file = CONFIG.base_path['A_LEVEL2']/f"202605/deal/{stock_code}.parquet"
-    #snapshot_file = CONFIG.base_path['A_LEVEL2']/f"202605/snapshot/{stock_code}.parquet"
+    #order_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"202605/order/{stock_code}.parquet"
+    #deal_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"202605/deal/{stock_code}.parquet"
+    #snapshot_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"202605/snapshot/{stock_code}.parquet"
 
-    order_file = CONFIG.base_path['A_LEVEL2']/f"order/2026/202605/{stock_code}.parquet"
-    deal_file = CONFIG.base_path['A_LEVEL2']/f"deal/2026/202605/{stock_code}.parquet"
-    snapshot_file = CONFIG.base_path['A_LEVEL2']/f"snapshot/2026/202605/{stock_code}.parquet"
+    order_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"order/2026/202605/{stock_code}.parquet"
+    deal_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"deal/2026/202605/{stock_code}.parquet"
+    snapshot_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"snapshot/2026/202605/{stock_code}.parquet"
     
     assert order_file.exists(), f"Error: '{order_file}'"
     assert deal_file.exists(), f"Error: '{deal_file}'"
@@ -690,13 +690,13 @@ def rebuild_order_book(df_all):
 def process_single_stock_day(date, stock_code):
     daily_feature_dict={}
 
-    #order_file = CONFIG.base_path['A_LEVEL2']/f"202605/order/{stock_code}.parquet"
-    #deal_file = CONFIG.base_path['A_LEVEL2']/f"202605/deal/{stock_code}.parquet"
-    #snapshot_file = CONFIG.base_path['A_LEVEL2']/f"202605/snapshot/{stock_code}.parquet"
+    #order_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"202605/order/{stock_code}.parquet"
+    #deal_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"202605/deal/{stock_code}.parquet"
+    #snapshot_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"202605/snapshot/{stock_code}.parquet"
 
-    order_file = CONFIG.base_path['A_LEVEL2']/f"order/2026/202605/{stock_code}.parquet"
-    deal_file = CONFIG.base_path['A_LEVEL2']/f"deal/2026/202605/{stock_code}.parquet"
-    snapshot_file = CONFIG.base_path['A_LEVEL2']/f"snapshot/2026/202605/{stock_code}.parquet"
+    order_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"order/2026/202605/{stock_code}.parquet"
+    deal_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"deal/2026/202605/{stock_code}.parquet"
+    snapshot_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY']/f"snapshot/2026/202605/{stock_code}.parquet"
     
     if not (os.path.exists(order_file) and os.path.exists(deal_file) and os.path.exists(snapshot_file)):
         return None

@@ -127,32 +127,32 @@ class StockPoolManager:
             
             if hist is not None and not hist.empty:
                 # 计算价格极值
-                max_price = hist['high'].max()
+                max_price = float(hist['high'].max())
                 max_date_ts = hist['high'].idxmax()
                 max_date = max_date_ts.strftime('%Y-%m-%d')
-                min_price = hist['low'].min()
+                min_price = float(hist['low'].min())
                 min_date_ts = hist['low'].idxmin()
                 min_date = min_date_ts.strftime('%Y-%m-%d')
 
                 # 计算最大涨幅和当前涨幅
                 ref_close = float(hist['close'].iloc[0])
                 max_gains = 100.0 * (max_price-ref_close) / ref_close
-                cur_gains = 100.0 * (hist['close'].iloc[-1]-ref_close) / ref_close
+                cur_gains = 100.0 * (float(hist['close'].iloc[-1])-ref_close) / ref_close
 
                 # 最大回撤
                 max_drawdown = 0.0
                 maxdd_duration = 0
                 post_max_data = hist[hist.index > max_date_ts]
                 if not post_max_data.empty:
-                    min_price_after_max = post_max_data['low'].min()
+                    min_price_after_max = float(post_max_data['low'].min())
                     max_drawdown = 100*(max_price - min_price_after_max) / max_price
                     # 最大回撤持续时长
                     low_date_ts = post_max_data['low'].idxmin()
-                    maxdd_duration = hist.index.get_loc(low_date_ts) - hist.index.get_loc(max_date_ts)
+                    maxdd_duration = int(hist.index.get_loc(low_date_ts) - hist.index.get_loc(max_date_ts))
 
                 # 动态吊灯止损价
-                last_atr = hist['atr'].iloc[-1]
-                hh = hist["high"].rolling(CONFIG.params['ATR_WINDOW']).max().iloc[-1]
+                last_atr = float(hist['atr'].iloc[-1])
+                hh = float(hist["high"].rolling(CONFIG.params['ATR_WINDOW']).max().iloc[-1])
                 chandelier_exitprice = hh - CONFIG.params['ATR_MULT'] * last_atr
                 chandelier_exitprice = round(float(chandelier_exitprice), 2) if pd.notna(chandelier_exitprice) else 0.0
                 
@@ -182,7 +182,7 @@ class StockPoolManager:
             if row['highest_duration'] > 60:
                 self._do_remove(code, name, "最高点间隔超过60天")
             # 条件 2：回撤超过 30%
-            elif row['maxdd'] <= -0.3:
+            elif row['maxdd'] > 40:
                 self._do_remove(code, name, "从最高点回撤超过30%")
             # 条件 3：吊灯止损触发
             elif fclose < fchandelier_loss:
