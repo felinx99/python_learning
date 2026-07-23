@@ -1,8 +1,12 @@
+import json
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import pandas as pd
 import pyarrow.parquet as pq
-from common import CONFIG
+from common import CONFIG, DATAFRAME
+from dataclasses import dataclass
+from enum import IntEnum
 from multiprocessing import Pool
 from api.timeprofile import TimeProfile
 
@@ -22,14 +26,7 @@ class StratifiedFeatureEngine:
         核心步骤：根据买卖方向自动切换标准化标尺 -> 分钟级压缩 -> 双流合流
         """
         # 提取时间分钟项
-        stock_code = int(df_tradedeals['SecuCode'].iat[0])
-        stock_str = str(stock_code).zfill(6)
         rday = int(df_tradedeals['TradingDay'].iat[0])
-        yearmonth = str(rday)[:6]  # 订单分层数据按月保存
-        dst_dir = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / f"01_buffer/daily/metrics/ordertier"
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        dst_file = dst_dir / f"ordertier_{stock_str}_{yearmonth}.parquet"
-
         df_tradedeals['Minute'] = df_tradedeals['DealTime'] // 100000
                 
         # --- A. 成交流分层还原 ---
@@ -113,20 +110,209 @@ class StratifiedFeatureEngine:
         df_features = deal_pivot.join(cancel_pivot, how='outer').fillna(0)
         df_features['TradingDay'] = rday
         df_features.reset_index(inplace=True)
-
-        # 5. 安全增量合并（带去重防护）
-        if dst_file.exists():
-            existing_df = pd.read_parquet(dst_file)
-            # 从历史数据中，把属于这些交易日的数据全部剔除（实现“新数据覆盖旧数据”）
-            existing_df = existing_df[existing_df['TradingDay'] != rday]
-            df_features = pd.concat([existing_df, df_features], ignore_index=True)
-            
-        df_features = df_features.sort_values(by='TradingDay').reset_index(drop=True)
-        df_features.to_parquet(dst_file, compression='zstd', index=False)
-
-        print(f"💾 特征成功保存 ➡️ {dst_file.name} | 数据量: {df_features.shape}")
-                
         return df_features
+
+
+
+class TimeFrame(IntEnum):
+    Ticks = 0
+    MicroSeconds = 1
+    Seconds = 2
+    Minutes = 3
+    Days = 4
+    Weeks = 5
+    Months = 6
+    Years = 7
+    NoTimeFrame = 8
+
+@dataclass
+class Resample:
+   timeframe: TimeFrame = 0
+   compression: int = 1
+
+   def __init__(self, timeframe=TimeFrame.Seconds, compression=1):
+       self.timeframe = timeframe
+       self.compression = compression
+
+FREQ_MAP = {
+    TimeFrame.Seconds: "s",
+    TimeFrame.Minutes: "min", 
+    TimeFrame.Days: "D",
+    TimeFrame.Weeks: "W",
+    TimeFrame.Months: "ME",
+    TimeFrame.Years: "YE"
+}
+
+LABEL_MAP = {
+    TimeFrame.Seconds: "s",
+    TimeFrame.Minutes: "m",
+    TimeFrame.Days: "day",
+    TimeFrame.Weeks: "w",
+    TimeFrame.Months: "mon",
+    TimeFrame.Years: "y"
+}
+
+def save_csvfile(path=None, data=None, period=None):
+    datefmt = CONFIG.date_fmt[period]
+    
+    if not path.exists():
+        data['date'] = data['date'].astype('datetime64[s]')
+        data.to_csv(path, sep=',', encoding='utf-8-sig', index=False, date_format=datefmt, float_format='%.2f')
+        return data
+    else:
+        try:
+            df_dst = pd.read_csv(path, dtype=CONFIG.stock_csvtype, parse_dates=['date'])
+        except Exception as e:
+            return None
+
+        df_dst['date'] = df_dst['date'].astype('datetime64[s]')      
+        new_data_to_add = data[data['date'] > df_dst.iloc[-1, 0]]
+
+        if not new_data_to_add.empty:
+            df_dst = pd.concat([df_dst, new_data_to_add], ignore_index=True)
+            df_dst.to_csv(path, sep=',', encoding='utf-8-sig', index=False, date_format=datefmt, float_format='%.2f')
+            
+        if period == DATAFRAME.DAY:
+            return df_dst
+        else:
+            return None
+ 
+
+def parse_deal_time(date_str, time_series):
+    """
+    高效解析整型时间戳 (如 93000100) 为标准的 Datetime
+    """
+    time_str = time_series.astype(str).str.zfill(9)
+    hh = time_str.str[0:2]
+    mm = time_str.str[2:4]
+    ss = time_str.str[4:6]
+    ms = time_str.str[6:9]
+    dt_str = str(date_str) + " " + hh + ":" + mm + ":" + ss + "." + ms
+    return pd.to_datetime(dt_str, format="%Y%m%d %H:%M:%S.%f")
+
+def generate_and_save_bars(deal_df=None, stock_str='', rday=0, resamples=[]):
+    """
+    功能 1：从逐笔成交 Tick 合成多周期 Bar 并保存为 Parquet
+    :param deal_df: 包含 Price, Volume, Side, DealTime 的原始 DataFrame
+    :param stock_str: 股票代码, 如 '000001'
+    :param rday: 日期,整数 如 20260529
+    """
+    deal_df = deal_df.copy()
+    date_str = str(rday)
+    deal_df.index = pd.DatetimeIndex(parse_deal_time(date_str, deal_df['DealTime']), name='date')
+    
+    # 3. 循环 Resample 合成各周期 K 线
+    for r in resamples:
+        # 组装 Pandas 频度 (例如: "1T", "5T", "1D")
+        freq = f"{r.compression}{FREQ_MAP[r.timeframe]}"
+        # 组装文件命名标签 (例如: "1m", "5m", "1day")
+        tf_label = f"{r.compression}{LABEL_MAP[r.timeframe]}"
+
+        # A股标准：右闭包，右标签（1分钟棒标记为当前分钟的结束）
+        # 对于 1D 数据，通常 label='left' 或默认即可，这里统一用符合分钟线直觉的配置或根据后续对比调整
+        if r.timeframe == TimeFrame.Days:
+            # 天级 K 线通常采用默认的左闭包，使得时间戳保持为当天 00:00:00
+            resampler = deal_df.resample(freq)
+            period = DATAFRAME['DAY']
+        else:
+            # 分钟/秒级高频 K 线严格遵循右闭包、右标签规则
+            resampler = deal_df.resample(freq, closed='right', label='right')
+            period  = DATAFRAME['MINUTE1']
+        
+        bar_df = resampler.agg({
+            'Price': ['first', 'max', 'min', 'last'],
+            'Volume': 'sum',
+            'Turnover': 'sum'
+        })
+        
+        # 扁平化多级表头
+        bar_df.columns = ['open', 'high', 'low', 'close', 'volume', 'turnover']
+        
+        # 剔除非交易时段生成的无成交量的死棒 (比如中午 11:30-13:00)
+        bar_df = bar_df[bar_df['volume'] > 0].reset_index()
+        
+        bar_df = bar_df.astype({
+            'open': 'int32',
+            'high': 'int32',
+            'low': 'int32',
+            'close': 'int32',
+            'volume': 'int64',
+            'turnover': 'int64',
+            'date': 'datetime64[s]'  # 🚀 固化为秒级精度，去除不必要的毫秒/纳秒冗余
+        })
+        return bar_df       
+
+def predict_exchange_code(stock_str):       
+    # 60或68开头 -> 上海 (SH)
+    if stock_str.startswith(('60', '68')):
+        return "SH"
+    # 00或30开头 -> 深圳 (SZ)
+    elif stock_str.startswith(('00', '30')):
+        return "SZ"
+    # 83、87、43开头 -> 北京北交所/新三板 (BJ)
+    elif stock_str.startswith(('83', '87', '43')):
+        return "BJ"
+    
+    return "UNKNOWN"
+
+def verify_bars_against_csv(date_list):    
+    strdate_list = [str(d) for d in date_list]
+    formatted_dates = [f"{d[:4]}-{d[4:6]}-{d[6:]}" for d in strdate_list]
+    
+    src_root = CONFIG.base_path['CN_DATA_PATH']/ "stock/1day"
+    stockstr_list = [p.stem for p in src_root.glob('*.csv')]
+    
+
+    dst_root = CONFIG.tdx_data_path[DATAFRAME['DAY']]
+
+    for stock_str in stockstr_list:
+        exchange = predict_exchange_code(stock_str)
+        src_file = src_root/f"{stock_str}.csv"
+        dst_file = dst_root/f"{stock_str}.{exchange}.csv"
+
+        if src_file.exists() and not dst_file.exists():
+            print(f"❌ [文件缺失] 股票: {stock_str} | 目标文件 {dst_file.name} 不存在")
+            pass
+
+        if not src_file.exists() or not dst_file.exists():
+            continue
+
+        src_df = pd.read_csv(src_file)
+        dst_df = pd.read_csv(dst_file)
+        
+        src_df = src_df[src_df['date'].isin(formatted_dates)]
+        dst_df = dst_df[dst_df['date'].isin(formatted_dates)]
+
+        src_dates = set(src_df['date'])
+        dst_dates = set(dst_df['date'])
+        
+        for d in (src_dates - dst_dates):
+            print(f"⚠️ [日期缺失] 股票: {stock_str} | 日期: {d} | 原因: dst_file 中缺失该交易日")
+        for d in (dst_dates - src_dates):
+            print(f"⚠️ [日期缺失] 股票: {stock_str} | 日期: {d} | 原因: src_file 中缺失该交易日")
+
+        # 🟢 5. 基于 date 取交集对齐，准备进行价格校验
+        merged_df = pd.merge(src_df, dst_df, on='date', suffixes=('_src', '_dst'))
+        if merged_df.empty:
+            continue
+
+        # 🟢 6. 逐列对比 open, high, low, close
+        compare_cols = ['open', 'high', 'low', 'close']
+        for col in compare_cols:
+            src_val = merged_df[f'{col}_src']
+            dst_val_int = np.round(merged_df[f'{col}_dst'] * 100).astype(np.int32)
+
+            # 纯整数的不等判定 (!=)，CPU 执行效率极高
+            mismatch_mask = src_val != dst_val_int
+
+            # 如果存在不一致的行，精确打印定位
+            if mismatch_mask.any():
+                mismatch_rows = merged_df[mismatch_mask]
+                for _, row in mismatch_rows.iterrows():
+                    err_date = row['date']            
+                    print(f"🚨 [数据不一致] 股票: {stock_str} | 日期: {err_date}")
+ 
+            
 
 # ==============================================================================
 # 2. 指标合流计算函数
@@ -176,7 +362,7 @@ def load_cancelratio(stock_code=0, rday=0, window=20):
     【高性能时序加载器】提取目标日前 N 天的挂撤单时间序列
     """
     stock_str = str(stock_code).zfill(6)
-    src_file = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / f"01_buffer/daily/metrics/cancelratio/{stock_str}.parquet"
+    src_file = CONFIG.l2_path['L2_MATRICS']/f"cancelratio/{stock_str}.parquet"
     if not src_file.exists():
         return pd.DataFrame()
         
@@ -197,16 +383,19 @@ def load_ordertier_baseline(baseline_date: int, stock_str='') -> dict:
     """
     🎯 核心逻辑：提取指定测试期baseline_date的那一个月数据, 固化生成每只股票的绝对股数分层阈值
     """
+    locked_thresholds = {}
+    default_thres = {70: 1000, 95: 8000, 99.5: 50000}
+
     yearmonth = str(baseline_date)[:6]  # 提取年月，如 202606
 
-    ordertier_dir = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / f"01_buffer/daily/metrics/ordertierbaseline"
-    ordertier_file = ordertier_dir / f"ordertier_baseline_{stock_str}_{yearmonth}.parquet"
-    ordertier_df = pd.read_parquet(ordertier_file)
+    ordertier_dir = CONFIG.l2_path['L2_MATRICS'] / f"ordertierbaseline/{yearmonth}"
+    ordertier_file = ordertier_dir / f"ordertierbaseline_{stock_str}.parquet"
+    if not ordertier_file.exists():
+        locked_thresholds = {'bid': default_thres, 'ask': default_thres, 'total': default_thres}
+        print(f"WARNING: {stock_str} 无法读取订单分层文件 {ordertier_file}")
+        return locked_thresholds
 
-    print(f"🔒 [基准锁定] 正在使用 {yearmonth} 的数据计算静态标准化分层阈值...")
-    locked_thresholds = {}
-    default_thres = {70: 10000.0, 95: 50000.0, 99.5: 200000.0}
-    
+    ordertier_df = pd.read_parquet(ordertier_file)
     if ordertier_df.empty:
         locked_thresholds = {'bid': default_thres, 'ask': default_thres, 'total': default_thres}
         return locked_thresholds
@@ -258,7 +447,7 @@ def load_ordertier_baseline(baseline_date: int, stock_str='') -> dict:
             
     return locked_thresholds
 
-def calculate_cancelratio(df_deal, df_cancel, df_window: pd.DataFrame) -> pd.DataFrame:
+def calculate_cancelratio(df_deal, df_cancel, df_window: pd.DataFrame, stock_str='') -> pd.DataFrame:
     """
     【波段特征引擎】计算 20 天时序大单撤单非对称度与欺诈性建模特征
     """
@@ -266,10 +455,8 @@ def calculate_cancelratio(df_deal, df_cancel, df_window: pd.DataFrame) -> pd.Dat
     #     return pd.DataFrame()
         
     # 提取当前交易日和代码
-    if df_deal is None or df_deal.empty:
-        return
     trade_date = int(df_deal['TradingDay'].iat[0])
-    stock_code = int(df_deal['SecuCode'].iat[0])
+    stock_code = int(stock_str)
        
     # # ----------------==================================----------------
     # # 1. 计算 20 天滚动的累计撤单率 (消除单日随机流动性冲击的噪音)
@@ -321,7 +508,7 @@ def calculate_cancelratio(df_deal, df_cancel, df_window: pd.DataFrame) -> pd.Dat
     stock_str = str(stock_code).zfill(6)
     rday = int(df_deal['TradingDay'].iat[0])
     
-    dst_dir = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / "01_buffer/daily/metrics/cancelorder"
+    dst_dir = CONFIG.l2_path['L2_MATRICS']/'cancelorder'
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst_file = dst_dir / f"{stock_str}.parquet"
     
@@ -374,7 +561,6 @@ def calculate_cancelratio(df_deal, df_cancel, df_window: pd.DataFrame) -> pd.Dat
 
     # 4. 组装单日轻量化盘口指标行
     df_day_metric = pd.DataFrame([{
-        'SecuCode': stock_code,
         'TradingDay': rday,
         # 原始基础总量
         'buy_cancel_at_touch': buy_cancel_at_touch,
@@ -387,6 +573,8 @@ def calculate_cancelratio(df_deal, df_cancel, df_window: pd.DataFrame) -> pd.Dat
         'total_weighted_buy_cancel': total_weighted_buy_cancel,
         'total_weighted_sell_cancel': total_weighted_sell_cancel
     }])
+
+    return df_day_metric
     
     # -----------------------------------------------------------------------------------------------------------------
     """
@@ -471,48 +659,27 @@ def calculate_cancelratio(df_deal, df_cancel, df_window: pd.DataFrame) -> pd.Dat
 
 
 
-def derive_volumeprofile(df_deal=None):
-    if df_deal is None or df_deal.empty: return
-    stock_code = int(df_deal['SecuCode'].iat[0])
-    stock_str = str(stock_code).zfill(6)
-    rday = int(df_deal['TradingDay'].iat[0]) 
+def calculate_vpdistribution(df_deal=None, stock_str='', rday=0):
+    #计算成交量价格分布，统计每个价格点上有多少成交量
     yearmonth = str(rday)[:6]  # 提取年月，如 202606
+    stock_code = int(stock_str)
+              
+    df_deal = df_deal.copy()     
+    # 极轻量聚合：生成单日 Profile
+    df_profile = df_deal.groupby('Price', as_index=False)['Volume'].sum()
+    
+    # 将股票代码和日期作为元数据写入，或者直接保存在每行中方便后续合并
+    df_profile['SecuCode'] = stock_code
+    df_profile['TradingDay'] = rday
+    
+    # 强制转换紧凑类型，进一步省内存和磁盘空间
+    df_profile['Price'] = df_profile['Price'].astype('int32')
+    df_profile['Volume'] = df_profile['Volume'].astype('int64')
 
-    dst_dir = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / f"01_buffer/daily/metrics/volumeprofile"
-    dst_dir.mkdir(parents=True, exist_ok=True)
-    dst_file = dst_dir / f"volumeprofile_{stock_str}_{yearmonth}.parquet"
-    # 如果已经存在缓存，直接跳过（避免重复计算历史数据）
-        
-    try:    
-        df_deal = df_deal[df_deal['Side'].isin([0, 1])].copy()     
-        # 极轻量聚合：生成单日 Profile
-        df_profile = df_deal.groupby('Price', as_index=False)['Volume'].sum()
-        
-        # 将股票代码和日期作为元数据写入，或者直接保存在每行中方便后续合并
-        df_profile['SecuCode'] = stock_code
-        df_profile['TradingDay'] = rday
-        
-        # 强制转换紧凑类型，进一步省内存和磁盘空间
-        df_profile['Price'] = df_profile['Price'].astype('int32')
-        df_profile['Volume'] = df_profile['Volume'].astype('int64')
-        
-        if dst_file.exists():
-            existing_df = pd.read_parquet(dst_file)
-            # 如果今天的数据之前跑过一部分，重新更新时会用最新的覆盖旧的
-            existing_df = existing_df[existing_df['TradingDay'] != rday]
-            df_profile = pd.concat([existing_df, df_profile], ignore_index=True)
+    return df_profile
 
-        
-        df_profile = df_profile.sort_values(by=['TradingDay', 'Price']).reset_index(drop=True)
-        
-        # 写入缓存目录
-        df_profile.to_parquet(dst_file, compression='zstd', index=False)
-          
-        
-    except Exception as e:
-        print(f"❌ 生成缓存失败 {dst_file.name}: {str(e)}")
 
-def load_volumeprofile(stock_code=0, rday=0, lookback_type='fixed', window_value=20,free_float_shares=0.0):
+def load_vpdistribution(stock_str='', rday=0, lookback_type='fixed', window_value=20, free_shares=0.0):
     """
     【高性能动态加载器】
     从缓存目录中，根据动态或固定规则，倒序加载某只股票所需的历史单日 Profile DataFrame 列表。
@@ -523,8 +690,7 @@ def load_volumeprofile(stock_code=0, rday=0, lookback_type='fixed', window_value
     - window_value: 若为 'fixed' 代表天数(如 20)；若为 'turnover' 代表目标换手率倍数(如 1.0 代表 100% 换手)
     - free_float_shares: 该股的自由流通股本（仅在 'turnover' 模式下需要）
     """
-    stock_str = str(stock_code).zfill(6)
-    src_file = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / f"01_buffer/daily/metrics/volumeprofile/{stock_str}.parquet"             
+    src_file = CONFIG.l2_path['L2_MATRICS']/f"vpdistribution/{stock_str}.parquet"             
     if not src_file.exists(): return []
 
     df_p = pd.read_parquet(src_file)
@@ -555,10 +721,10 @@ def load_volumeprofile(stock_code=0, rday=0, lookback_type='fixed', window_value
             break
             
         # --- 策略 B：如果是动态换手率窗口 ---
-        if lookback_type == 'turnover' and free_float_shares:
+        if lookback_type == 'turnover' and free_shares:
             day_vol = cday_df['Volume'].sum()
             cumulative_volume += day_vol
-            current_turnover_ratio = cumulative_volume / free_float_shares
+            current_turnover_ratio = cumulative_volume / free_shares
             if current_turnover_ratio >= window_value:
                 break
                 
@@ -566,12 +732,12 @@ def load_volumeprofile(stock_code=0, rday=0, lookback_type='fixed', window_value
     loaded_profiles.reverse()
     return loaded_profiles
 
-def calculate_volumeprofile(list_of_daily_profiles: list, today_close_price: int, va_ratio: float = 0.70) -> pd.DataFrame:
+def calculate_volumeprofile(list_of_daily_profiles=[], today_close_price=0, va_ratio=0.70):
     if not list_of_daily_profiles or len(list_of_daily_profiles) == 0:
         return pd.DataFrame()
         
     df_today = list_of_daily_profiles[-1]
-    trade_date = df_today['TradingDay'].iloc[0] if 'TradingDay' in df_today.columns else df_today['TradeDate'].iloc[0]
+    trade_date = df_today['TradingDay'].iloc[0]
     secu_code = df_today['SecuCode'].iloc[0]
     today_total_vol = df_today['Volume'].sum()
     
@@ -664,26 +830,11 @@ def calculate_volumeprofile(list_of_daily_profiles: list, today_close_price: int
         'actual_lookback_days': len(list_of_daily_profiles)
     }])
 
-def calculate_sweepratio(df_deal=None):
-    if df_deal is None or df_deal.empty: return
-    stock_code = int(df_deal['SecuCode'].iat[0])
-    stock_str = str(stock_code).zfill(6)
-    rday = int(df_deal['TradingDay'].iat[0])
 
-    if df_deal.empty:
-        # 如果当天停牌或无成交，返回符合 Schema 结构的空行
-        return pd.DataFrame(), pd.DataFrame([{f.name: (0 if not pa.types.is_string(f.type) else str(stock_code)) for f in CONFIG.LEVEL2_METRICS_SCHEMA}]).assign(TradeDate=rday)
-
-    # --- 1. 过滤撤单，映射主动攻击方 ---
-    trade_deals = df_deal[df_deal['Side'].isin([0, 1])].copy()
-    if trade_deals.empty:
-        return pd.DataFrame(), pd.DataFrame([{f.name: (0 if not pa.types.is_string(f.type) else str(stock_code)) for f in CONFIG.LEVEL2_METRICS_SCHEMA}]).assign(TradeDate=rday)
-    
+def calculate_sweepratio(trade_deals=None, stock_str='', rday=0):
     # 预打脉冲标签
     t = trade_deals['DealTime']
     trade_deals['is_call_auction_phase'] = ((t >= 92500000) & (t < 93000000)) | ((t >= 145700000) & (t < 150000000))
-    trade_deals['Turnover'] = trade_deals['Price'] * trade_deals['Volume']
-
 
     # 筛选扫盘事件
     buy_deals = trade_deals.groupby('BuyID').agg(
@@ -794,8 +945,7 @@ def calculate_sweepratio(df_deal=None):
     # 6. 组装单行结果 DataFrame (无缝对接后续的覆写或追加流程)
     # =====================================================================
     result_dict = {
-        'TradeDate': rday,
-        'SecuCode': stock_code,
+        'TradingDay': rday,
         'daily_total_volume': daily_total_volume,
         'daily_total_turnover': daily_total_turnover,
         
@@ -825,190 +975,427 @@ def calculate_sweepratio(df_deal=None):
         'sell_multi_depth_vol_ratio': sell_multi_depth_vol_ratio, 
         'buy_multi_depth_market_ratio': buy_multi_depth_market_ratio, 
         'sell_multi_depth_market_ratio': sell_multi_depth_market_ratio, 
-        # 预留占位符 (配合您的脉冲时段指标，若不需要可删去)
-        'buy_pulse_count': 0,
-        'sell_pulse_count': 0
     }
-    
     return pd.DataFrame([result_dict])
-
-def save_daily_batch_to_monthly_file(daily_batch_df: pd.DataFrame, rday: int):
-    """
-    将当日全市场所有股票计算出的指标，安全地追加到月度大文件中，并按日期、股票排序。
-    支持断点重跑（自动靠后生成的记录覆盖旧记录）。
-    """
-    if daily_batch_df.empty:
-        return
-    output_dir = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / f"01_buffer/daily/metrics/sweepratio"   
-    output_dir.mkdir(parents=True, exist_ok=True)
-    yearmonth = str(rday)[:6]  # 提取年月，如 202606
-    file_path = output_dir / f"sweepratio_metrics_{yearmonth}.parquet"
-
-    # 2. 如果月度文件已存在，读取并合并（8G内存读写几MB的文件，耗时在毫秒级）
-    if file_path.exists():
-        existing_df = pq.read_table(file_path).to_pandas()
-        # 如果今天的数据之前跑过一部分，重新更新时会用最新的覆盖旧的
-        existing_df = existing_df[existing_df['TradingDay'] != rday]
-        combined_df = pd.concat([existing_df, daily_batch_df], ignore_index=True)
-    else:
-        combined_df = daily_batch_df
-
-    # 3. 按日期、股票代码全局严格排序
-    combined_df = combined_df.sort_values(by=['TradeDate', 'SecuCode']).reset_index(drop=True)
-
-    # 4. 根据严格指定的 Schema 写入 Parquet 文件
-    table = pa.Table.from_pandas(combined_df, schema=CONFIG.LEVEL2_METRICS_SCHEMA)
-    pq.write_table(table, file_path, compression='zstd')
-    print(f"💾 成功更新月度大文件: {file_path.name} | 当前全月总记录数: {len(combined_df)} 行")
+    
 
 # ==============================================================================
 # 状态读写辅助函数（支持断点续跑、增量运行）
 # ==============================================================================
-def load_rolling_state() -> dict:
-    filepath = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / "01_buffer/daily/metrics/cancel_order/rolling_state.pkl"
 
-    """从本地磁盘载入历史滚动状态"""
-    if filepath.exists():
-        try:
-            with open(filepath, 'rb') as f:
-                state = pickle.load(f)
-            print(f"📂 成功载入历史滚动状态，共包含 {len(state)} 只股票的历史数据。")
-            return state
-        except Exception as e:
-            print(f"❌ 载入状态文件失败: {e}，将初始化全新状态。")
-    else:
-        print("ℹ️ 未检测到历史状态文件，将进行冷启动初始化。")
-    return {}
-
-def save_rolling_state(state_data: dict):
-    filepath = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / "01_buffer/daily/metrics/cancel_order/rolling_state.pkl"
-    """将当前滚动状态保存到本地磁盘"""
-    try:
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        with open(filepath, 'wb') as f:
-            pickle.dump(state_data, f)
-        print(f"💾 滚动状态已成功保存至: {filepath}")
-    except Exception as e:
-        print(f"❌ 保存状态文件失败: {e}")
-
-def calculate_OrderTier(trade_deals):
-    if trade_deals is None or trade_deals.empty: return
-    stock_code = int(trade_deals['SecuCode'].iat[0])
-    stock_str = str(stock_code).zfill(6)
-    rday = int(trade_deals['TradingDay'].iat[0])
+def calculate_OrderTier(trade_deals, stock_str='', rday=0):
     yearmonth = str(rday)[:6]  # 订单分层门限数据按月保存
-
-    dst_dir = CONFIG.base_path['LEVEL2_WORKSHAPCE_PATH'] / f"01_buffer/daily/metrics/ordertierbaseline"
-    dst_dir.mkdir(parents=True, exist_ok=True)
-    dst_file = dst_dir / f"ordertier_baseline_{stock_str}_{yearmonth}.parquet"
       
-    try:    
-        buy_volume_df = trade_deals.groupby('BuyID').agg(Volume=('Volume', 'sum'))
-        sell_volume_df = trade_deals.groupby('SellID').agg(Volume=('Volume', 'sum'))
+  
+    buy_volume_df = trade_deals.groupby('BuyID').agg(Volume=('Volume', 'sum'))
+    sell_volume_df = trade_deals.groupby('SellID').agg(Volume=('Volume', 'sum'))
 
-        buy_volume = buy_volume_df.values.ravel()
-        sell_volume = sell_volume_df.values.ravel()
+    buy_volume = buy_volume_df.values.ravel()
+    sell_volume = sell_volume_df.values.ravel()
 
-        buy_volume_mean = float(np.mean(buy_volume))
-        sell_volume_mean = float(np.mean(sell_volume))
+    buy_volume_mean = float(np.mean(buy_volume))
+    sell_volume_mean = float(np.mean(sell_volume))
 
-        daily_ordertier_df = pd.DataFrame([[rday, buy_volume_mean, sell_volume_mean, buy_volume, sell_volume]], columns=['TradingDay', 'BidVolumeMean', 'AskVolumeMean', 'BidVolume', 'AskVolume'])
+    daily_ordertier_df = pd.DataFrame([[rday, buy_volume_mean, sell_volume_mean, buy_volume, sell_volume]], columns=['TradingDay', 'BidVolumeMean', 'AskVolumeMean', 'BidVolume', 'AskVolume'])
 
-        
-        if dst_file.exists():
-            existing_df = pd.read_parquet(dst_file)   
-            # 从历史数据中，把属于这些交易日的数据全部剔除（实现“新数据覆盖旧数据”）
-            existing_df = existing_df[existing_df['TradingDay'] != rday]
-            daily_ordertier_df = pd.concat([existing_df, daily_ordertier_df], ignore_index=True).reset_index(drop=True)
-        
-        daily_ordertier_df.to_parquet(dst_file, compression='zstd', index=False)   
-    except Exception as e:
-        print(f"❌ 生成缓存失败 {dst_file.name}: {str(e)}")
+    return daily_ordertier_df
 
 
+DATE_COL_MAP = {
+    'min1_bar': 'date',
+    'sweepratio': 'TradingDay',
+    'vpdistribution': 'TradingDay',
+    'volumeprofile': 'TradingDay',
+    'ordertierbaseline': 'TradingDay',
+    'min1_ordertier': 'TradingDay',
+    'ordertier': 'TradingDay',
+}
 
-def derive_deal_metrics(date_list=[], checkmonth='', checkyear=''):    
-    stage_deal_root = CONFIG.base_path['LEVEL2_BUFFER_PATH'] / f"monthlystaging/deal/{checkyear}/{checkyear}{checkmonth}"
+SORT_COLS_MAP = {
+    'min1_bar': ['date'],
+    'sweepratio': ['TradingDay'],
+    'vpdistribution': ['TradingDay', 'Price'],
+    'volumeprofile': ['TradingDay'],
+    'ordertierbaseline': ['TradingDay'],
+    'min1_ordertier': ['TradingDay'],
+    'ordertier': ['TradingDay'],
+}
+
+# SCHEMA_MAP = {
+#     'min1_bar': CONFIG.BAR_SCHEMA,
+#     'sweepratio': CONFIG.SWEEPRATIO_SCHEMA,
+#     'vpdistribution': CONFIG.VP_SCHEMA,
+#     'volumeprofile': CONFIG.VOLUMEPROFILE_SCHEMA,
+#     'ordertierbaseline': CONFIG.ORDERTIERBASE_SCHEMA,
+#     'min1_ordertier': CONFIG.ORDERTIERM1_SCHEMA,
+#     'ordertier': CONFIG.ORDERTIER_SCHEMA,
+# }
+
+def _get_metric_save_dir(metric_type: str, year: str, yearmonth: str):
+    """
+    内部辅助函数：根据类型及时间动态生成保存路径
+    #ohlc 1分钟数据，单股票按年存储
+    #sweepratio 日数据，单股票全时间段存储
+    #vp_distribution 日数据，单股票全时间段存储
+    #volumeprofile 日数据，单股票全时间段存储
+    #ordertier_baseline 日数据，单股票按月存储，基准以月为单位                   
+    #ordertier 1分钟数据，单股票按年存储               
+    #ordertier 日数据，单股票全时间段存储  
+    """
+ 
+    if metric_type == 'min1_bar':
+        return CONFIG.base_path['CN_DATA_PATH'] / f"stock/1m/{year}"
+    elif metric_type == 'ordertierbaseline':
+        return CONFIG.l2_path['L2_MATRICS'] / f"ordertierbaseline/{yearmonth}"
+    elif metric_type == 'min1_ordertier':
+        return CONFIG.l2_path['L2_MATRICS'] / f"ordertier_min1/{year}"
+    elif metric_type in ('sweepratio', 'vpdistribution', 'volumeprofile', 'ordertier'):
+        return CONFIG.l2_path['L2_MATRICS'] / metric_type
+    else:
+        raise ValueError(f"❌ 未知的指标类型: {metric_type}")
+
+
+# ==============================================================================
+# 🟢 核心落盘保存函数
+# ==============================================================================
+def save_deal_metrics(save_df: pd.DataFrame, stock_str: str, type: str):
+    """
+    通用量化指标落盘保存函数（自动处理历史数据增量覆盖与 Schema 校验）
+    :param save_df: 需要保存的 DataFrame 数据
+    :param stock_str: 股票代码，如 '000001'
+    :param type: 指标类型，如 'min1_bar', 'sweepratio' 等
+    """
+    # 1. 获取当前指标对应的正确日期列名 ('date' 或 'TradingDay')
+    date_col = DATE_COL_MAP[type]
+    
+    sample_date = str(save_df[date_col].iloc[0]).replace('-', '').replace('/', '')
+    year = sample_date[:4]
+    yearmonth = sample_date[:6]
+
+    save_dir = _get_metric_save_dir(type, year, yearmonth)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    save_file = save_dir / f"{type}_{stock_str}.parquet"
+
+    if save_file.exists():
+        existing_df = pd.read_parquet(save_file)
+        new_dates = save_df[date_col].unique()
+        existing_df = existing_df[~existing_df[date_col].isin(new_dates)]
+        combined_df = pd.concat([existing_df, save_df], ignore_index=True)
+    else:
+        combined_df = save_df
+
+    combined_df = combined_df.sort_values(by=SORT_COLS_MAP[type]).reset_index(drop=True)
+    # table = pa.Table.from_pandas(combined_df, schema=SCHEMA_MAP[type], preserve_index=False)
+    combined_df.to_parquet(save_file, engine='pyarrow', compression='zstd', index=False)
+
+def derive_dealmetrics_daily(args):
+    #在一个周期里计算多个指标， 这些指标均基于df_deal数据，充分共享df_deal数据。
+    date_list, stock_str, free_shares = args
+    s_date = str(date_list[0])
+    checkyear = s_date[:4]
+    checkmonth = s_date[4:6] 
+
+    stage_deal_root = CONFIG.l2_path['L2_STAGE'] / f"deal/{checkyear}/{checkyear}{checkmonth}"
+
+    min1_bar_list = []
+    sweepratio_list = []
+    vpdistribution_list = []
+    volumeprofile_list = []
+    ordertierbaseline_list = [] 
+    min1_ordertier_list = []
+    ordertier_list = []
+
+    ret = False
     for rday in date_list:
-        # 3.1 读取每日全市场大文件（全天只读一次）
-        stockstr_list = [d.name for d in stage_deal_root.iterdir() if d.is_dir()]
-        stockstr_list = ['000001']
-        total_stocks = len(stockstr_list)
+        deal_file = stage_deal_root / f"{stock_str}/{stock_str}_{rday}.parquet"
+        if not deal_file.exists(): continue
 
-        for idx, stock_str in enumerate(stockstr_list):
-            stock_code = int(stock_str)
-            deal_file = stage_deal_root / f"{stock_str}/{stock_str}_{rday}.parquet"
-            assert deal_file.exists(), f"Error: '{deal_file}'"
-            df_deal = pd.read_parquet(deal_file, schema=CONFIG.DEAL_SCHEMA)
-            trade_deals = df_deal[df_deal['Side'].isin([0, 1])]
-            cancel_file = CONFIG.base_path['LEVEL2_BUFFER_PATH'] / f"monthlystaging/cancel/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
-            assert cancel_file.exists(), f"Error: '{cancel_file}'"
-            df_cancel = pd.read_parquet(cancel_file, schema=CONFIG.CANCEL_SCHEMA)           
-            df_cancel['CancelTime'] = df_cancel['DealTime']
-            # 计算吞单指标
-            # sweepratio_df = calculate_sweepratio(df_deal)
-            # save_daily_batch_to_monthly_file(daily_batch_df=sweepratio_df, rday=rday)
-            # 计算筹码峰指标
-            # calculate_volumeprofile 真正需要的代码，但未改造参数，还需要与下面的代码进行比较，进一步的结合
-            # derive_volumeprofile(df_deal)
-            # 计算订单分层指标
-            calculate_OrderTier(trade_deals) 
-            frozen_thresholds = load_ordertier_baseline(baseline_date=rday, stock_str=stock_str)
-            # 计算撤单指标
-            engine = StratifiedFeatureEngine()
-            # 进行特征压缩计算
-            df_minute_features = engine.process_minute_features(trade_deals, df_cancel, frozen_thresholds)
-            
-            calculate_cancelratio(trade_deals, df_cancel, df_window=pd.DataFrame())
+        ret = True
+        df_deal = pd.read_parquet(deal_file, schema=CONFIG.DEAL_SCHEMA)
+        df_deal['Turnover'] = df_deal['Price'] * df_deal['Volume']
+        trade_deals = df_deal[df_deal['Side'].isin([0, 1])]
+
+        min1 = Resample(timeframe=TimeFrame.Minutes, compression=1)
+        min1_bar_df = generate_and_save_bars(deal_df=trade_deals, stock_str=stock_str, rday=rday, resamples=[min1])
+        # 计算吞单指标
+        sweepratio_df = calculate_sweepratio(trade_deals, stock_str=stock_str, rday=rday)
+        # 计算筹码峰指标
+        vpdistribution_df = calculate_vpdistribution(trade_deals, stock_str=stock_str, rday=rday) #单日成交量价格分布基础数据
+        vp_window_df = load_vpdistribution(stock_str=stock_str, rday=rday, lookback_type='turnover', window_value=20,free_shares=free_shares) #turnover
+        volumeprofile_df = calculate_volumeprofile(vp_window_df) #筹码峰指标，利用单日数据生产可用指标
+        # 计算订单分层指标
+        ordertierbaseline_df = calculate_OrderTier(trade_deals, stock_str=stock_str, rday=rday) 
+        frozen_thresholds = load_ordertier_baseline(baseline_date=rday, stock_str=stock_str)
+        # 计算撤单指标
+        engine = StratifiedFeatureEngine()
+        # 进行特征压缩计算
+        cancel_file = CONFIG.l2_path['L2_STAGE'] / f"cancel/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
+        df_cancel = pd.read_parquet(cancel_file, schema=CONFIG.CANCEL_SCHEMA)           
+        df_cancel['CancelTime'] = df_cancel['DealTime']
+        min1_ordertier_df = engine.process_minute_features(trade_deals, df_cancel, frozen_thresholds)    
+        ordertier_df = calculate_cancelratio(trade_deals, df_cancel, df_window=pd.DataFrame())
+
+        if not min1_bar_df.empty:
+            min1_bar_list.append(min1_bar_df)
+        if not sweepratio_df.empty:
+            sweepratio_list.append(sweepratio_df)
+        if not vpdistribution_df.empty:
+            vpdistribution_list.append(vpdistribution_df)
+        if not volumeprofile_df.empty:
+            volumeprofile_list.append(volumeprofile_df)
+        if not ordertierbaseline_df.empty:
+            ordertierbaseline_list.append(ordertierbaseline_df)
+        if not min1_ordertier_df.empty:
+            min1_ordertier_list.append(min1_ordertier_df)
+        if not ordertier_df.empty:
+            ordertier_list.append(ordertier_df)
 
 
+    if min1_bar_list:
+        metric_df = pd.concat(min1_bar_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='min1_bar')
+    if sweepratio_list:
+        metric_df = pd.concat(sweepratio_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='sweepratio')
+    if vpdistribution_list:
+        metric_df = pd.concat(vpdistribution_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='vpdistribution')
+    if volumeprofile_list:
+        metric_df = pd.concat(volumeprofile_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='volumeprofile')
+    if ordertierbaseline_list:
+        metric_df = pd.concat(ordertierbaseline_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='ordertierbaseline')
+    if min1_ordertier_list:
+        metric_df = pd.concat(min1_ordertier_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='min1_ordertier')
+    if ordertier_list:
+        metric_df = pd.concat(ordertier_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='ordertier')
+
+    return ret, stock_str
+
+def derive_dealmetrics_monthly(args):
+    #在一个周期里计算多个指标， 这些指标均基于df_deal数据，充分共享df_deal数据。
+    yearmonth, stock_str, free_shares, mode = args
+    checkyear = yearmonth[:4]
+    checkmonth = yearmonth[4:6] 
+
+    stage_deal_root = CONFIG.l2_path['L2_STAGE'] / f"deal/{checkyear}/{checkyear}{checkmonth}"
+
+    min1_bar_list = []
+    sweepratio_list = []
+    vpdistribution_list = []
+    volumeprofile_list = []
+    ordertierbaseline_list = [] 
+    min1_ordertier_list = []
+    ordertier_list = []
+
+    if mode == 'CACHED':
+        deal_file = CONFIG.l2_path['L2_CACHED_MONTHLY'] / f"deal/{checkyear}/{checkyear}{checkmonth}/{stock_str}.parquet"
+    elif mode == 'ARCHIVED':
+        deal_file = CONFIG.base_path['L2_ARCHIVED_MONTHLY'] / f"deal/{checkyear}/{checkyear}{checkmonth}/{stock_str}.parquet"
+    if not deal_file.exists(): 
+        return False
+
+    deal_columns = ['Price', 'DealTime', 'Volume', 'Side', 'BuyID', 'DealID', 'SellID', 'TradingDay']
+    deal_monthly_pl = pl.read_parquet(deal_file, columns=deal_columns)
+    deal_dict = deal_monthly_pl.partition_by("TradingDay", as_dict=True)
+    empty_deal_df = pl.DataFrame(schema=deal_monthly_pl.schema)
+    del deal_monthly_pl
+
+    date_list = sorted(list(deal_dict.keys()))
+    ret = False
+    for rday in date_list:
+        deal_daily_pl = deal_dict.pop(rday, empty_deal_df)
+        if deal_daily_pl.is_empty(): continue
+
+        deal_daily_df = deal_daily_pl.to_pandas()
+        del deal_daily_pl
+        ret = True
+        deal_daily_df['Turnover'] = deal_daily_df['Price'] * deal_daily_df['Volume']
+        trade_deals = deal_daily_df[deal_daily_df['Side'].isin([0, 1])]
+
+        rday = rday[0]
+        min1 = Resample(timeframe=TimeFrame.Minutes, compression=1)
+        min1_bar_df = generate_and_save_bars(deal_df=trade_deals, stock_str=stock_str, rday=rday, resamples=[min1])
+        # 计算吞单指标
+        sweepratio_df = calculate_sweepratio(trade_deals, stock_str=stock_str, rday=rday)
+        # 计算筹码峰指标
+        vpdistribution_df = calculate_vpdistribution(trade_deals, stock_str=stock_str, rday=rday) #单日成交量价格分布基础数据
+        vp_window_df = load_vpdistribution(stock_str=stock_str, rday=rday, lookback_type='turnover', window_value=20,free_shares=free_shares) #turnover
+        volumeprofile_df = calculate_volumeprofile(vp_window_df) #筹码峰指标，利用单日数据生产可用指标
+        # 计算订单分层指标
+        ordertierbaseline_df = calculate_OrderTier(trade_deals, stock_str=stock_str, rday=rday) 
+        frozen_thresholds = load_ordertier_baseline(baseline_date='202511', stock_str=stock_str)
+        # # 计算撤单指标
+        engine = StratifiedFeatureEngine()
+        # # 进行特征压缩计算
+        cancel_file = CONFIG.l2_path['L2_STAGE'] / f"cancel/{checkyear}/{checkyear}{checkmonth}/{stock_str}/{stock_str}_{rday}.parquet"
+        df_cancel = pd.read_parquet(cancel_file, schema=CONFIG.CANCEL_SCHEMA)           
+        df_cancel['CancelTime'] = df_cancel['DealTime']
+        min1_ordertier_df = engine.process_minute_features(trade_deals, df_cancel, frozen_thresholds)    
+        ordertier_df = calculate_cancelratio(trade_deals, df_cancel, df_window=pd.DataFrame(), stock_str=stock_str)
+
+        if not min1_bar_df.empty:
+            min1_bar_list.append(min1_bar_df)
+        if not sweepratio_df.empty:
+            sweepratio_list.append(sweepratio_df)
+        if not vpdistribution_df.empty:
+            vpdistribution_list.append(vpdistribution_df)
+        if not volumeprofile_df.empty:
+            volumeprofile_list.append(volumeprofile_df)
+        if not ordertierbaseline_df.empty:
+            ordertierbaseline_list.append(ordertierbaseline_df)
+        if not min1_ordertier_df.empty:
+            min1_ordertier_list.append(min1_ordertier_df)
+        if not ordertier_df.empty:
+            ordertier_list.append(ordertier_df)
+
+
+    if min1_bar_list:
+        metric_df = pd.concat(min1_bar_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='min1_bar')
+    if sweepratio_list:
+        metric_df = pd.concat(sweepratio_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='sweepratio')
+    if vpdistribution_list:
+        metric_df = pd.concat(vpdistribution_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='vpdistribution')
+    if volumeprofile_list:
+        metric_df = pd.concat(volumeprofile_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='volumeprofile')
+    if ordertierbaseline_list:
+        metric_df = pd.concat(ordertierbaseline_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='ordertierbaseline')
+    if min1_ordertier_list:
+        metric_df = pd.concat(min1_ordertier_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='min1_ordertier')
+    if ordertier_list:
+        metric_df = pd.concat(ordertier_list, ignore_index=True)
+        save_deal_metrics(save_df=metric_df, stock_str=stock_str, type='ordertier')
+
+    return ret, stock_str
+  
+def get_tradingdate(tradingdate_dict={}, yearmonth=''):
+    """
+    给定年月查询对应的交易日期列表
+    :param tradingdate_dict: 形如 {'2025': ['20250103', '20250602', ...]} 的字典
+    :param yearmonth: 字符串形式的年月，例如 '202506'
+    :return: 属于该年月的交易日列表，例如 ['20250602', ...]
+    """
+    target_year = yearmonth[:4]
+    
+    # 1. 检查年份是否存在于字典中
+    if target_year not in tradingdate_dict:
+        return []
+    
+    # 2. 向量化/列表推导式过滤：筛选出所有以 'YYYYMM' 开头的日期元素
+    year_dates = tradingdate_dict[target_year]
+    matched_dates = [d for d in year_dates if d.startswith(yearmonth)]
+    
+    return matched_dates
+
+def derive_tasks(mode='', date_list=[]):
+    tasks = []
+    totaltask = 0
+
+    stockinfo = CONFIG.l2_path['STOCK_META']/'stockinfo_202607.csv'
+    stockinfo_df = pd.read_csv(stockinfo, dtype=CONFIG.stockinfo_csvtype)
+    freeshares_dict = stockinfo_df.set_index('Stock')['ActiveCapital'].to_dict()
+
+    if mode == 'DAILY':
+        s_date = str(date_list[0])
+        checkyear = s_date[:4]
+        checkmonth = s_date[4:6]  
+        stage_deal_root = CONFIG.l2_path['L2_STAGE'] / f"deal/{checkyear}/{checkyear}{checkmonth}"
+        stockstr_list = [d.name for d in stage_deal_root.iterdir() if d.is_dir() and len(d.name) == 6]      
+        totaltask = len(stockstr_list)
+        for stock_str in stockstr_list:
+            free_shares = freeshares_dict.get(stock_str, 10000000) 
+            tasks.append((date_list, stock_str, free_shares)) 
+
+        subprocess = derive_dealmetrics_daily
+    elif mode == 'CACHED':
+        # tradingdate_file = CONFIG.l2_path['STOCK_META']/f"stock_tradingdate.json"
+        # with open(tradingdate_file, 'r', encoding='utf-8') as f:
+        #     loaded_data = json.load(f)
+        # tradingdate = {k: v for k, v in loaded_data.items()}
+        for tmp_month in date_list:
+            checkyear = tmp_month[:4]
+            checkmonth = tmp_month[4:6]  
+            stage_deal_root = CONFIG.l2_path['L2_CACHED_MONTHLY'] / f"deal/{checkyear}/{checkyear}{checkmonth}"
+            stockstr_list = [d.stem for d in stage_deal_root.glob(f"*.parquet")]
+            totaltask += len(stockstr_list)
+            # tradingdate_list = get_tradingdate(tradingdate, tmp_month)
+            for stock_str in stockstr_list:
+                free_shares = freeshares_dict.get(stock_str, 10000000)
+                tasks.append((tmp_month, stock_str, free_shares, mode)) 
+
+            subprocess = derive_dealmetrics_monthly
+    elif mode == 'ARCHIVED':
+        # tradingdate_file = CONFIG.l2_path['STOCK_META']/f"stock_tradingdate.json"
+        # with open(tradingdate_file, 'r', encoding='utf-8') as f:
+        #     loaded_data = json.load(f)
+        # tradingdate = {k: v for k, v in loaded_data.items()}
+
+        for tmp_month in date_list:
+            checkyear = tmp_month[:4]
+            checkmonth = tmp_month[4:6]  
+            stage_deal_root = CONFIG.base_path['L2_ARCHIVED_MONTHLY'] / f"deal/{checkyear}/{checkyear}{checkmonth}"
+            stockstr_list = [d.stem for d in stage_deal_root.glob(f"*.parquet")]
+            totaltask += len(stockstr_list)
+            # tradingdate_list = get_tradingdate(tradingdate, tmp_month)
+            for stock_str in stockstr_list:
+                free_shares = freeshares_dict.get(stock_str, 10000000)
+                tasks.append((tmp_month, stock_str, free_shares, mode))
+            subprocess = derive_dealmetrics_monthly
+
+    physical_cores = 8
+    with Pool(physical_cores) as p:
+        print(f"开始level2指标生成")        
+        results = p.imap_unordered(subprocess, tasks, chunksize=50)
+        success_count = 0
+        for success, stock in results:
+            if success:
+                success_count += 1
+                print(f"进程推进中.. 已成功校验 {success_count}/{totaltask} 只股票 [{stock}]", end="\r")
+
+
+def plot_metrics():
+    # 使用finplot对指标进行可视化，
+    # 功能描述：
+    #   1. 与股票的日线或1分钟ohlc数据联动。子图1绘制ohlc数据，子图2~N用于绘制指标。 
+    #   2. 可通过键盘操作根据股票列表切换上一个股票的或下一个股票，图表跟随股票联动切换显示。
+    # 功能目标：用于新指标的正确性检验 或 用于多指标的联动测试
+    pass
 
 if __name__ == '__main__':
     tasks = []
     daily_results = []
     date_list = [
-        # 20260701, 
-        20260702, 20260703,         
+        # 20260701, 20260702, 20260703,         
         # 20260706, 20260707, 20260708, 20260709, 20260710, 
-        # 20260713, 20260714, 
-        # 20260715, 20260716, 20260717,
+        # 20260713, 20260714, 20260715, 20260716, 
+        20260717,
         # 20260720, 20260721, 20260722, 20260723, 20260724,
         # 20260727, 20260728, 20260729, 20260730, 20260731
     ]
-    s_date = str(date_list[0])
-    cur_year = s_date[:4]
-    cur_month = s_date[4:6]
 
-    derive_deal_metrics(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-   
-        
+    cache_month_list = [202601, 202602, 202603, 202604, 202605, 202606]
 
-    # date_list = [ 20260601 ] 
-    # fpath = CONFIG.inferred_path['LEVEL2_BUFFER_PATH']/f"monthlystaging/order/{cur_year}/{cur_year}{cur_month}/tmp_split"
-    # stockcode_list = [d.name for d in fpath.iterdir() if d.is_dir()]
-    # stockcode_list = [564, 725]
-
-    # total_stocks = len(stockcode_list)
-    # for rday in date_list:
-    #     for stock_code in stockcode_list:
-    #         tasks.append((rday, stock_code, cur_year, cur_month))
+    archived_month_list = ['202605']
     
-    # physical_cores = 1#psutil.cpu_count(logical=False)
 
-    # with Pool(physical_cores) as p:
-    #     print(f"开始level2指标生成")        
-    #     results = p.imap_unordered(calculate_sweepratio, tasks, chunksize=50)
-    #     success_count = 0
-    #     for ret_df in results:
-    #         if not ret_df.empty:
-    #             success_count += 1
-    #             daily_results.append(ret_df)
-    #             print(f"进程推进中{rday}... 已成功计算指标 {success_count}/{len(tasks)} 只股票", end="\r")
+    # ------------ 每日更新任务 --------------------
+    # derive_tasks(mode='DAILY', date_list=date_list)
+    
+    # ------------ 缓存数据处理任务 --------------------
+    # derive_tasks(mode='CACHED', date_list=cache_month_list)
 
-    # # 🏁 当天所有股票子进程跑完后，主进程一气呵成：合并 -> 去重 -> 排序 -> 追加落盘
-    # if daily_results:
-    #     daily_all_shares_df = pd.concat(daily_results, ignore_index=True)
-    #     save_daily_batch_to_monthly_file(
-    #         daily_batch_df=daily_all_shares_df, 
-    #         rday=rday
-    #     )
+    # ------------ 历史数据处理任务 --------------------
+    derive_tasks(mode='ARCHIVED', date_list=archived_month_list)
+
+    # ------------ 独立任务 - 数据可视化 --------------------
+    # plot_metrics()      # 非必要任务，仅在有新指标时通过可视化方法检验指标的正确性 或 多指标策略的联动观察
+       
