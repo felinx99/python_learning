@@ -1,7 +1,6 @@
 import argparse
 import itertools
 import numpy as np
-import psutil
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -93,7 +92,7 @@ def download_stock():
         task_filelist.extend(new_filelist)
 
     #获取物理核心数，多进程处理
-    physical_cores = psutil.cpu_count(logical=False)
+    physical_cores = 8
     pb_data = []
 
     with Pool(physical_cores) as p:
@@ -193,6 +192,49 @@ def download_sector(sectorlist=[]):
         with pq.ParquetWriter(pb_path, table.schema, compression='zstd') as writer:
             writer.write_table(table)
 
+def predict_exchange_code(stock_str):       
+    # 60或68开头 -> 上海 (SH)
+    if stock_str.startswith(('60', '68')):
+        return "SH"
+    # 00或30开头 -> 深圳 (SZ)
+    elif stock_str.startswith(('00', '30')):
+        return "SZ"
+    # 83、87、43开头 -> 北京北交所/新三板 (BJ)
+    elif stock_str.startswith(('83', '87', '43')):
+        return "BJ"
+    
+    return "UNKNOWN"
+
+def download_stockinfo():
+    feed = datafeed.FeedManager.register('tdx')
+    assert feed is not None
+    feed.init_feed()
+    stockinfo_list = []
+    hist= dict()
+
+    field_list = ['Name', 'ActiveCapital', 'J_zgb', 'VolBase', 'J_start', 'rs_hyname']
+
+    checkyear = '2026'
+    checkmonth = '07'
+
+    dstfile = CONFIG.l2_path['STOCK_META']/f"stockinfo_{checkyear}{checkmonth}.csv"
+
+    stage_deal_root = CONFIG.l2_path['L2_STAGE']/f"deal/{checkyear}/{checkyear}{checkmonth}"
+    stockstr_list = [d.name for d in stage_deal_root.iterdir() if d.is_dir() and len(d.name) == 6]
+
+    for stock_str in stockstr_list:
+        exchange = predict_exchange_code(stock_str)
+        stock = f"{stock_str}.{exchange}"
+  
+        hist = feed.get_stockinfo(stock_code=stock, field_list=field_list)
+        if hist:
+            hist['Stock'] = stock_str
+            hist['StockAll'] = stock
+            stockinfo_list.append(hist)  
+
+    df = pd.DataFrame(stockinfo_list)
+    df.to_csv(dstfile, sep=',', encoding='utf-8-sig', index=False, date_format=CONFIG.date_fmt[DATAFRAME['DAY']], float_format='%.2f')
+
 if __name__ == '__main__':
     PARSER = argparse.ArgumentParser()
     #PARSER.add_argument('-f', '--fpath', required=True)
@@ -229,7 +271,7 @@ if __name__ == '__main__':
     with TimeProfile():
         download_stock()
         download_sector(sectorlist=['concept', 'l1', 'l2', 'l3'])
-
+    # download_stockinfo()
 
 
 

@@ -216,6 +216,16 @@ class TdxFeed(FeedBase):
             dividend_type=1)
         df = self._L2Vol_to_df(mul_zb_res)
         return df
+
+    def get_stockinfo(self, **kwargs):
+        stock_code = kwargs.get('stock_code', None)
+        field_list = kwargs.get('field_list', None)
+        try:
+            fdc = tq.get_stock_info(stock_code=stock_code, field_list=field_list)
+        except Exception as e:
+            print(f"获取 {stock_code} 的股票信息失败: {e}")
+            return {}
+        return fdc
         
 @FeedManager.init('tushare')
 class TushareFeed(FeedBase):
