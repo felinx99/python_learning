@@ -203,17 +203,19 @@ class OrderBook:
 
         # 买方：价格从大到小排，取前 N 档
         sorted_bid_prices = sorted(self.bids.keys(), reverse=True)[:n_levels]
-        bids_list = [
-            (p, self.bids[p].total_volume, self.bids[p].order_count) 
-            for p in sorted_bid_prices
-        ]
+        # bids_list = [
+        #     (p, self.bids[p].total_volume, self.bids[p].order_count) 
+        #     for p in sorted_bid_prices
+        # ]
+        bids_list = [(p, self.bids[p].total_volume) for p in sorted_bid_prices]
 
         # 卖方：价格从小到大排，取前 N 档
         sorted_ask_prices = sorted(self.asks.keys())[:n_levels]
-        asks_list = [
-            (p, self.asks[p].total_volume, self.asks[p].order_count) 
-            for p in sorted_ask_prices
-        ]   
+        # asks_list = [
+        #     (p, self.asks[p].total_volume, self.asks[p].order_count) 
+        #     for p in sorted_ask_prices
+        # ]   
+        asks_list = [(p, self.asks[p].total_volume) for p in sorted_ask_prices]   
     
         return bids_list, asks_list
 
