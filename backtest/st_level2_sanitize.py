@@ -996,7 +996,7 @@ def _csv2parquet(args):
 
         # check_data_integrity(order_df, deal_df)
 
-        return stock_str, True, None
+    return stock_str, True, None
 
 
 def preConvert(date_list=[], checkmonth='', checkyear='2026'):
@@ -1008,7 +1008,7 @@ def preConvert(date_list=[], checkmonth='', checkyear='2026'):
     logging.info(f"  步骤 1: 对 {checkyear}-{checkmonth} 批次 {date_list} 的全市场文件进行格式转换...")
     tasks = []
     stockcode_set = set()
-    physical_cores = 1
+    physical_cores = 8
     success_count = 0
     
     # 约定暂存区根目录
@@ -1346,11 +1346,10 @@ def generate_staging_dateset(date_list=[], checkmonth='', checkyear=''):
 
 if __name__ == '__main__':
     date_list = [
-        20260901, 20260902, 20260903, 20260904,          
-        # 20260907, 20260908, 20260909, 20260910, 20260911,         
-        # 20260914, 20260915, 20260916, 20260917, 20260918,        
-        # 20260921, 20260922, 20260923, 20260924,  
-        # 20260928, 20260929, 20260930, 20260931,      
+        20261008, 20261009,         
+    #     20261012, 20261013, 20261014, 20261015, 20261016,         
+    #     20261019, 20261020, 20261021, 20261022, 20261023,     
+    #     20261026, 20261027, 20261028, 20261029, 20261030, 
     ]
 
     s_date = str(date_list[0])
@@ -1358,10 +1357,10 @@ if __name__ == '__main__':
     cur_month = s_date[4:6]
     # ------------ 每日更新任务 --------------------
     # presplit(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-    preConvert(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-    generate_staging_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-    # 每日更新,检验数据,存档cancel和orderbook文件
-    Verify_level2(date_list=date_list, checkmonth=cur_month, checkyear=cur_year, period='daily', bsave=True, bvalidate=True)    
+    # preConvert(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
+    # generate_staging_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
+    # # 每日更新,检验数据,存档cancel和orderbook文件
+    # Verify_level2(date_list=date_list, checkmonth=cur_month, checkyear=cur_year, period='daily', bsave=True, bvalidate=True)    
     
     # ------------ 月底存档任务 --------------------
     # generate_monthly_dateset(checkmonth=cur_month, checkyear=cur_year)
@@ -1369,7 +1368,7 @@ if __name__ == '__main__':
     # Verify_level2(checkmonth=cur_month, checkyear=cur_year, period='monthly', bsave=False, bvalidate=True)   #月底存档并检验数据
 
     # ------------ 历史数据任务 ---------------------
-    # Verify_level2(checkmonth='05', checkyear='2026', period='archived', bsave=True, bvalidate=False)    #用于历史数据生成撤单文件 
+    Verify_level2(checkmonth='04', checkyear='2026', period='archived', bsave=True, bvalidate=False)    #用于历史数据生成撤单文件 
 
 
 '''
@@ -1396,5 +1395,13 @@ date_list = [
         20260817, 20260818, 20260819, 20260820, 20260821,         
         20260824, 20260825, 20260826, 20260827, 20260828,         
         20260831,      
+    ]
+
+date_list = [
+        20260901, 20260902, 20260903, 20260904,          
+        20260907, 20260908, 20260909, 20260910, 20260911,         
+        20260914, 20260915, 20260916, 20260917, 20260918,     
+        20260921, 20260922, 20260923, 20260924,  
+        20260928, 20260929, 20260930,   
     ]
 '''
