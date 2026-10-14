@@ -392,17 +392,27 @@ class Level2MetricCalculator:
         df_tradedeals['Minute'] = df_tradedeals['DealTime'] // 100000
                 
         # --- A. 成交流分层还原 ---
-        buy_map = df_tradedeals.groupby('BuyID')['Volume'].sum()
-        sell_map = df_tradedeals.groupby('SellID')['Volume'].sum()
+        buy_agg = df_tradedeals.groupby('BuyID').agg({'Volume': 'sum', 'Side': 'min'})
+        sell_agg = df_tradedeals.groupby('SellID').agg({'Volume': 'sum', 'Side': 'max'})
         
         # 仅在 unique 订单级别计算 Layer 映射关系
-        df_tradedeals['Sell_Layer'] = df_tradedeals['SellID'].map(sell_map.apply(Level2MetricCalculator._label_order_volume, args=(stock_thresholds['ask'],)))
-        df_tradedeals['Buy_Layer'] = df_tradedeals['BuyID'].map(buy_map.apply(Level2MetricCalculator._label_order_volume, args=(stock_thresholds['bid'],)))
+        buy_layers = Level2MetricCalculator._label_order_volume(buy_agg['Volume'].values, stock_thresholds['bid'])
+        sell_layers = Level2MetricCalculator._label_order_volume(sell_agg['Volume'].values, stock_thresholds['ask'])
+        
+        buy_layer_map = pd.Series(buy_layers, index=buy_agg.index)
+        sell_layer_map = pd.Series(sell_layers, index=sell_agg.index)
 
+        df_tradedeals['Buy_Layer'] = df_tradedeals['BuyID'].map(buy_layer_map)
+        df_tradedeals['Sell_Layer'] = df_tradedeals['SellID'].map(sell_layer_map)
+
+        buy_is_active = pd.Series(buy_agg['Side'].values == 0, index=buy_agg.index)
+        sell_is_active = pd.Series(sell_agg['Side'].values == 1, index=sell_agg.index)
+        
+        df_tradedeals['Buy_Is_Active'] = df_tradedeals['BuyID'].map(buy_is_active)
+        df_tradedeals['Sell_Is_Active'] = df_tradedeals['SellID'].map(sell_is_active)
+        
         # --- B. 拆分买卖流量流向 (将每笔交易分裂为买/卖两端) ---
         # 买方流量
-        buy_active_series = df_tradedeals.groupby('BuyID')['Side'].min() == 0
-        df_tradedeals['Buy_Is_Active'] = df_tradedeals['BuyID'].map(buy_active_series)
         df_buy_flow = pd.DataFrame({
             'Minute': df_tradedeals['Minute'],
             'Category': np.where(df_tradedeals['Buy_Is_Active'], 'act_buy', 'pas_buy'),
@@ -411,8 +421,6 @@ class Level2MetricCalculator:
         })
         
         # 卖方流量
-        sell_active_series = df_tradedeals.groupby('SellID')['Side'].max() == 1
-        df_tradedeals['Sell_Is_Active'] = df_tradedeals['SellID'].map(sell_active_series)
         df_sell_flow = pd.DataFrame({
             'Minute': df_tradedeals['Minute'],
             'Category': np.where(df_tradedeals['Sell_Is_Active'], 'act_sell', 'pas_sell'),
@@ -445,17 +453,20 @@ class Level2MetricCalculator:
         df_cancel = df_cancel.copy()
         df_cancel['Minute'] = df_cancel['CancelTime'] // 100000
         df_cancel['Layer'] = 'Small'
+
+        volumes = df_cancel['Volume'].values
+        sides = df_cancel['Side'].values
+        # 向量化分配买卖盘阈值
+        layers = np.empty(len(df_cancel), dtype=object)
+        is_buy = sides == -1
+        is_sell = ~is_buy
         
-        is_buy_cancel = df_cancel['Side'] == -1  
-        if is_buy_cancel.any():
-            df_cancel.loc[is_buy_cancel, 'Layer'] = df_cancel.loc[is_buy_cancel, 'Volume'].apply(
-                Level2MetricCalculator._label_order_volume, args=(stock_thresholds['bid'],)
-            )
-        if (~is_buy_cancel).any():
-            df_cancel.loc[~is_buy_cancel, 'Layer'] = df_cancel.loc[~is_buy_cancel, 'Volume'].apply(
-                Level2MetricCalculator._label_order_volume, args=(stock_thresholds['ask'],)
-            )
+        if is_buy.any():
+            layers[is_buy] = Level2MetricCalculator._label_order_volume(volumes[is_buy], stock_thresholds['bid'])
+        if is_sell.any():
+            layers[is_sell] = Level2MetricCalculator._label_order_volume(volumes[is_sell], stock_thresholds['ask'])
         
+        df_cancel['Layer'] = layers
         cancel_pivot = df_cancel.pivot_table(
             index='Minute', 
             columns=['Side', 'Layer'], 
