@@ -64,9 +64,9 @@ class StockPoolManager:
 
             # 3. 新增入池记录（此时不计算价格指标，只记录基础信息）
             new_record = {
-                'ts_code': code, 'name': name, 'indate': now, 'max_gains': 0.0, 'cur_gains': 0.0,
-                'lowest': None, 'lowest_date': None, 'highest': None, 'highest_date': None,
-                'maxdd': 0.0, 'maxdd_duration': None, 'highest_duration': 0, 'chandelier_loss': (0.0,0.0), 'in_type': new_record_name
+                'ts_code':code, 'name':name, 'indate':now, 'max_gains':0.0, 'cur_gains':0.0, 'lowest':None, 
+                'lowest_date':None, 'highest':None, 'highest_date':None, 'maxdd':0.0, 'maxdd_duration':None, 
+                'highest_duration':0, 'chandelier_close':0.0, 'chandelier_exit':0.0, 'in_type':new_record_name
             }
             self.selection_df = pd.concat([self.selection_df, pd.DataFrame([new_record])], ignore_index=True)
 
@@ -166,7 +166,8 @@ class StockPoolManager:
                 self.selection_df.at[idx, 'highest_duration'] = (today - pd.to_datetime(max_date)).days
                 self.selection_df.at[idx, 'max_gains'] = max_gains
                 self.selection_df.at[idx, 'cur_gains'] = cur_gains
-                self.selection_df.at[idx, 'chandelier_loss'] = (float(hist['close'].iloc[-1]), chandelier_exitprice)
+                self.selection_df.at[idx, 'chandelier_close'] = float(hist['close'].iloc[-1])
+                self.selection_df.at[idx, 'chandelier_exit'] = chandelier_exitprice
 
     def _check_exit_conditions(self):
         """执行出池判定逻辑"""
@@ -177,9 +178,10 @@ class StockPoolManager:
         for _, row in temp_df.iterrows():
             code = row['ts_code']
             name = row['name']
-            fclose, fchandelier_loss = row['chandelier_loss']
+            fclose = row['chandelier_close']
+            fchandelier_loss = row['chandelier_exit']
             # 条件 1：最高点超过 60 天
-            if row['highest_duration'] > 60:
+            if row['highest_duration'] > 100:
                 self._do_remove(code, name, "最高点间隔超过60天")
             # 条件 2：回撤超过 30%
             elif row['maxdd'] > 40:
