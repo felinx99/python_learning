@@ -371,7 +371,7 @@ def rebuild_and_verify_daily(args):
             continue
 
         order_columns = ['BizIndex', 'LastPrice', 'OrderID', 'OrderTime', 'OrderType', 'Price', 'Volume', 'TradingDay']
-        orday_daily_pl = pl.read_parquet(order_file, columns=order_columns)  
+        order_daily_pl = pl.read_parquet(order_file, columns=order_columns)  
 
         deal_columns = ['Price', 'DealTime', 'Volume', 'Side', 'BuyID', 'DealID', 'SellID', 'TradingDay']
         deal_daily_pl = pl.read_parquet(deal_file, columns=deal_columns)  
@@ -390,12 +390,12 @@ def rebuild_and_verify_daily(args):
             snapshot_daily_pl = None
 
         params = (checkyear, checkmonth, stock_str, rday)
-        isSucess, msg = rebuild_and_verify_OB(orday_daily_pl, deal_daily_pl, snapshot_daily_pl, params, bsave, bvalidate)  
+        isSucess, msg = rebuild_and_verify_OB(order_daily_pl, deal_daily_pl, snapshot_daily_pl, params, bsave, bvalidate)  
         if not isSucess:
             msg_ret.append(f"[X] 失败 | {stock_str} : {rday} | 错误信息: {msg}") 
             isSucess_ret = False
         # 清理单日内存占用
-        del orday_daily_pl, deal_daily_pl, snapshot_daily_pl
+        del order_daily_pl, deal_daily_pl, snapshot_daily_pl
         # gc.collect()
 
     msg_ret = "".join(msg_ret)
@@ -940,9 +940,9 @@ def _csv2parquet(args):
         dst_deal = dst_dir_deal / f"tmp_split/{stock_code}/{rday}_0.parquet"
         dst_snapshot = dst_dir_snapshot / f"tmp_split/{stock_code}/{rday}_0.parquet"
 
-        dst_order_csv = dst_dir_order / f"tmp_split/{stock_code}/{rday}_0.csv"
-        dst_deal_csv = dst_dir_deal / f"tmp_split/{stock_code}/{rday}_0.csv"
-        dst_snapshot_csv = dst_dir_snapshot / f"tmp_split/{stock_code}/{rday}_0.csv"
+        # dst_order_csv = dst_dir_order / f"tmp_split/{stock_code}/{rday}_0.csv"
+        # dst_deal_csv = dst_dir_deal / f"tmp_split/{stock_code}/{rday}_0.csv"
+        # dst_snapshot_csv = dst_dir_snapshot / f"tmp_split/{stock_code}/{rday}_0.csv"
 
         order_df = pd.read_csv(src_order, encoding='gb2312', dtype=CONFIG.order_csvtype)
         deal_df = pd.read_csv(src_deal, encoding='gb2312', dtype=CONFIG.deal_csvtype)
@@ -979,9 +979,9 @@ def _csv2parquet(args):
             snapshot_df[f'AskPrice{i}'] = snapshot_df[f'AskPrice{i}'] // 100
             snapshot_df[f'BidPrice{i}'] = snapshot_df[f'BidPrice{i}'] // 100
 
-        order_df.to_csv(dst_order_csv, sep=',', encoding='utf-8-sig', index=False, float_format='%.2f')
-        deal_df.to_csv(dst_deal_csv, sep=',', encoding='utf-8-sig', index=False, float_format='%.2f')
-        snapshot_df.to_csv(dst_snapshot_csv, sep=',', encoding='utf-8-sig', index=False, float_format='%.2f')
+        # order_df.to_csv(dst_order_csv, sep=',', encoding='utf-8-sig', index=False, float_format='%.2f')
+        # deal_df.to_csv(dst_deal_csv, sep=',', encoding='utf-8-sig', index=False, float_format='%.2f')
+        # snapshot_df.to_csv(dst_snapshot_csv, sep=',', encoding='utf-8-sig', index=False, float_format='%.2f')
 
         order_df =order_df.drop(columns=['WandCode', 'TradeType', 'TradeCode'])
         deal_df =deal_df.drop(columns=['WandCode', 'TradeType', 'TradeCode', 'BSCode'])
@@ -1346,30 +1346,39 @@ def generate_staging_dateset(date_list=[], checkmonth='', checkyear=''):
 
 if __name__ == '__main__':
     date_list = [
-        20261008, 20261009,         
-    #     20261012, 20261013, 20261014, 20261015, 20261016,         
-    #     20261019, 20261020, 20261021, 20261022, 20261023,     
-    #     20261026, 20261027, 20261028, 20261029, 20261030, 
+        # 20261008, 20261009,         
+        # 20261012, 20261013, 20261014, 20261015, 
+        20261016, 20261019, 20261020, 
+        # 20261021, 20261022, 20261023,     
+        # 20261026, 20261027, 20261028, 20261029, 20261030, 
     ]
 
     s_date = str(date_list[0])
     cur_year = s_date[:4]
     cur_month = s_date[4:6]
     # ------------ 每日更新任务 --------------------
+    # 每日更新,检验数据,存档cancel和orderbook文件
     # presplit(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
     # preConvert(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
     # generate_staging_dateset(date_list=date_list, checkmonth=cur_month, checkyear=cur_year)
-    # # 每日更新,检验数据,存档cancel和orderbook文件
     # Verify_level2(date_list=date_list, checkmonth=cur_month, checkyear=cur_year, period='daily', bsave=True, bvalidate=True)    
     
     # ------------ 月底存档任务 --------------------
-    # generate_monthly_dateset(checkmonth=cur_month, checkyear=cur_year)
     #月底存档,检验数据
+    # generate_monthly_dateset(checkmonth=cur_month, checkyear=cur_year)
     # Verify_level2(checkmonth=cur_month, checkyear=cur_year, period='monthly', bsave=False, bvalidate=True)   #月底存档并检验数据
 
     # ------------ 历史数据任务 ---------------------
-    Verify_level2(checkmonth='04', checkyear='2026', period='archived', bsave=True, bvalidate=False)    #用于历史数据生成撤单文件 
+    # Verify_level2(checkmonth='04', checkyear='2026', period='archived', bsave=True, bvalidate=False)    #用于历史数据生成撤单文件 
 
+    # ------------ 数据Debug ---------------------
+    bsave, bvalidate, period = False, True, 'debug' 
+    checkyear, checkmonth = '2026', '10'
+    date_list = ['20261019'] 
+    stock_str = '600267'
+
+    args = (date_list, stock_str, checkyear, checkmonth, bsave, bvalidate, period)    
+    rebuild_and_verify_daily(args)
 
 '''
 date_list = [
