@@ -163,6 +163,7 @@ class OrderBook:
             """处理成交"""
             node = self.ref_id_map.get(ref_id)
             if node is None:
+                print(f"execute deal error, rei_id {ref_id} not exit, qty {exec_qty} price {exec_price} ")
                 return False
             
             side = node.side
